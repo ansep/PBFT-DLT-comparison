@@ -1,0 +1,28 @@
+{
+  "name": "dlt",
+  "version": "1.0.0",
+  "description": "DLT-based solution to State Machine Replication Problem",
+  "main": "tendermint.js",
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ansep/consensus-blockchain-comparison.git"
+  },
+  "keywords": [
+    "tendermint"
+  ],
+  "author": "",
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/ansep/consensus-blockchain-comparison/issues"
+  },
+  "homepage": "https://github.com/ansep/consensus-blockchain-comparison#readme",
+  "dependencies": {
+    "abci": "^5.0.1",
+    "js-abci": "^0.1.1",
+    "tendermint": "^2.0.3",
+    "ws": "^8.17.0"
+  }
+}

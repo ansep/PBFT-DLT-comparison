@@ -1,0 +1,121 @@
+version: '3'
+
+services:
+  node0:
+    container_name: node0
+    depends_on:
+      - abci0
+    image: "tendermint/tendermint:v0.32.12"
+    ports:
+      - "26656-26657:26656-26657"
+    environment:
+      - ID=0
+      - LOG=${LOG:-tendermint.log}
+    volumes:
+      - ./node0:/tendermint:Z
+    command: node --proxy_app=tcp://abci0:26658
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.2
+  
+
+  node1:
+    container_name: node1
+    image: "tendermint/tendermint:v0.32.12"
+    ports:
+      - "26659-26660:26656-26657"
+    environment:
+      - ID=1
+      - LOG=${LOG:-tendermint.log}
+    command: node --proxy_app=tcp://abci1:26658
+    volumes:
+      - ./node1:/tendermint:Z
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.3
+    depends_on:
+      - abci1
+
+
+  node2:
+    container_name: node2
+    image: "tendermint/tendermint:v0.32.12"
+    environment:
+      - ID=2
+      - LOG=${LOG:-tendermint.log}
+    ports:
+      - "26661-26662:26656-26657"
+    volumes:
+      - ./node2:/tendermint:Z
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.4
+    command: node --proxy_app=tcp://abci2:26658
+    depends_on:
+      - abci2
+
+
+  node3:
+    container_name: node3
+    image: "tendermint/tendermint:v0.32.12"
+    environment:
+      - ID=3
+      - LOG=${LOG:-tendermint.log}
+    ports:
+      - "26663-26664:26656-26657"
+    volumes:
+      - ./node3:/tendermint:Z
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.5
+    command: node --proxy_app=tcp://abci3:26658
+    depends_on:
+      - abci3
+
+  abci0:
+    build:
+      context: ./js-abci
+      dockerfile: Dockerfile
+    container_name: abci0
+    tty: true
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.6
+
+  abci1:
+    build:
+      context: ./js-abci
+      dockerfile: Dockerfile
+    container_name: abci1
+    tty: true
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.7
+
+  abci2:
+    build:
+      context: ./js-abci
+      dockerfile: Dockerfile
+    container_name: abci2
+    tty: true
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.8
+
+  abci3:
+    build:
+      context: ./js-abci
+      dockerfile: Dockerfile
+    container_name: abci3
+    tty: true
+    networks:
+      localnet:
+        ipv4_address: 192.167.10.9
+
+networks:
+  localnet:
+    driver: bridge
+    ipam:
+      driver: default
+      config:
+        - subnet: 192.167.10.0/24
