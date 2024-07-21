@@ -1,6 +1,7 @@
 // client/pbft_client.js
 const net = require("net");
 const readline = require("readline");
+const crypto = require("crypto");
 
 // List of nodes (servers) to connect to
 const nodes = [
@@ -71,7 +72,12 @@ function startCli() {
             data: transactionData,
             seq: seqNumber,
           };
-          responses.push(sendMessage(node, message));
+          // Compute the hash of the message in SHA-256
+          const hash = crypto
+            .createHash("sha256")
+            .update(JSON.stringify({ data: transactionData, seq: seqNumber }))
+            .digest("hex");
+          responses.push(sendMessage(node, { message, hash }));
         });
 
         Promise.race([
