@@ -24,6 +24,7 @@ let prepareCount = {};
 let commitCount = {};
 let replies = {};
 let consensusReached = {};
+let socketClient = {};
 
 // Failure detection variables
 let lastPrimaryCheck = Date.now();
@@ -56,27 +57,10 @@ async function handleRequest(data, hash, seq, socket) {
   // Ensure consensusReached is initially set to false
   consensusReached[seq] = false;
   console.log(consensusReached[seq]);
+  socketClient[seq] = socket;
   try {
     // Check if the request is a transaction or a state request
     if (data.type === undefined) {
-      const { from, to, amount } = data;
-
-      // CHECKS TO BE MOVED TO COMMIT PHASE
-      //   // Check if accounts exist
-      //   const fromExists = await accountExists(from);
-      //   const toExists = await accountExists(to);
-
-      //   if (!fromExists || !toExists) {
-      //     console.error(`One or more accounts do not exist`);
-      //     socket.write(`One or more accounts do not exist`);
-      //     return;
-      //   }
-
-      //   // Check balance before proceeding
-      //   const fromBalance = await getBalance(from);
-
-      //   if (fromBalance >= amount) {
-      //   msg_to_send = { from, to, amount };
       if (isPrimary()) {
         console.log("Node is primary, broadcasting PrePrepare");
         broadcast({
@@ -88,18 +72,19 @@ async function handleRequest(data, hash, seq, socket) {
         });
       }
 
-      // Await for consensus to be reached
-      await new Promise((resolve) => {
-        const interval = setInterval(() => {
-          if (consensusReached[seq]) {
-            clearInterval(interval);
-            resolve();
-          }
-        }, 1000); // Check every second for consensus
+      //   // Await for consensus to be reached
+      //   await new Promise((resolve) => {
+      //     const interval = setInterval(() => {
+      //       if (consensusReached[seq]) {
+      //         clearInterval(interval);
+      //         resolve();
+      //       }
+      //     }, 1000); // Check every second for consensus
 
-        // Update balances in the database
-      });
-      updateBalancesInDatabase(from, to, amount, socket);
+      //     // Update balances in the database
+      //   });
+
+      //   updateBalancesInDatabase(from, to, amount, socket);
       //   } else {
       //     console.error(
       //       `Insufficient balance for transaction: ${JSON.stringify(data)}`
@@ -109,6 +94,7 @@ async function handleRequest(data, hash, seq, socket) {
       //     );
       //   }
     } else if (data.type === "get_state") {
+      //TODO: do same way of transaction
       console.log("Node is primary, broadcasting PrePrepare for get_state");
       broadcast({ type: "pre-prepare", data, seq });
 
@@ -280,39 +266,69 @@ async function handleCommit(data, sent_by, hash, seq) {
     if (!consensusReached[seq]) {
       consensusReached[seq] = true;
       console.log(consensusReached[seq]);
+      console.log("Socket seq commit", socketClient[seq]);
 
       const { from, to, amount } = data; // Ensure `from`, `to`, and `amount` are correctly accessed from `data`
 
-      try {
-        console.log(`Updating database: ${amount} from ${from} to ${to}`);
-        db.query("UPDATE state SET balance = balance - ? WHERE username = ?", [
-          amount,
-          from,
-        ]);
-        db.query("UPDATE state SET balance = balance + ? WHERE username = ?", [
-          amount,
-          to,
-        ]);
+      const fromExists = await accountExists(from);
+      const toExists = await accountExists(to);
 
-        //Now, reply should be sent directly by the handle request function
+      if (!fromExists || !toExists) {
+        const errorMessage = {
+          type: "Reply",
+          success: false,
+          error: `One or more accounts do not exist`,
+        };
+        console.error(`One or more accounts do not exist`);
+        socketClient[seq].write(JSON.stringify(errorMessage));
+        return;
+      }
 
-        // broadcast({ type: 'reply', data, seq });
+      // Check balance before proceeding
+      const fromBalance = await getBalance(from);
 
-        // Send confirmation to the original requester (if socket is provided)
-        // if (data.socket) {
-        //     const message = { type: "Reply", success: true };
-        //     data.socket.write(JSON.stringify(message));
-        // }
-      } catch (err) {
-        console.error("Error updating balances in database:", err.message);
+      if (fromBalance >= amount) {
+        try {
+          console.log(`Updating database: ${amount} from ${from} to ${to}`);
+          db.query(
+            "UPDATE state SET balance = balance - ? WHERE username = ?",
+            [amount, from]
+          );
+          db.query(
+            "UPDATE state SET balance = balance + ? WHERE username = ?",
+            [amount, to]
+          );
 
-        // if (data.socket) {
-        //     const errorMessage = { type: "Reply", success: false, error: err.message };
-        //     data.socket.write(JSON.stringify(errorMessage));
-        // }
-
-        // // Still broadcast the reply to inform other nodes about the error
-        // broadcast({ type: 'reply', data, seq });
+          // Send confirmation to the original requester (if socket is provided)
+          if (socketClient[seq]) {
+            const message = {
+              type: "Reply",
+              success: true,
+              transaction: { from, to, amount },
+            };
+            socketClient[seq].write(JSON.stringify(message));
+          }
+        } catch (error) {
+          console.error("Error updating balances:", error.message);
+          const errorMessage = {
+            type: "Reply",
+            success: false,
+            error: error.message,
+          };
+          socketClient[seq].write(JSON.stringify(errorMessage));
+        }
+      } else {
+        console.error(
+          `Insufficient balance for transaction: ${JSON.stringify(data)}`
+        );
+        const errorMessage = {
+          type: "Reply",
+          success: false,
+          error: `Insufficient balance for transaction: ${JSON.stringify(
+            data
+          )}`,
+        };
+        socketClient[seq].write(JSON.stringify(errorMessage));
       }
     }
   }

@@ -11,6 +11,9 @@ const nodes = [
   { hostname: "node4", port: 4000 },
 ];
 
+let consensusState = {};
+let consensusReached = {};
+
 // Function to connect to a server and send a message
 async function sendMessage(node, message) {
   return new Promise((resolve, reject) => {
@@ -24,6 +27,25 @@ async function sendMessage(node, message) {
     client.on("data", (data) => {
       console.log(`Received reply from ${node.hostname}:${node.port}: ${data}`);
       // Handle the reply as needed
+      const response = JSON.parse(data);
+      if (response.success) {
+        consensusState[message.message.seq].push(response);
+        if (
+          !consensusReached[message.message.seq] &&
+          consensusState[message.message.seq].length >=
+            Math.floor((2 * nodes.length) / 3) + 1 &&
+          consensusState[message.message.seq].every(
+            (value) => JSON.stringify(value) === JSON.stringify(response)
+          )
+        ) {
+          console.log(
+            "Consensus reached with ",
+            consensusState[message.message.seq].length,
+            " replies"
+          );
+          consensusReached[message.message.seq] = true;
+        }
+      }
       client.destroy(); // Close the connection
       resolve({ node: node.hostname, data });
     });
@@ -65,6 +87,8 @@ function startCli() {
         const transactionData = { from, to, amount };
         const seqNumber = Date.now(); // Use timestamp as sequence number (for simplicity)
 
+        consensusState[seqNumber] = [];
+        consensusReached[seqNumber] = false;
         // Send the transaction request to all nodes
         nodes.forEach((node) => {
           const message = {
