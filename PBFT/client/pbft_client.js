@@ -105,7 +105,7 @@ function startCli() {
       );
     }
 
-    r1.setPrompt("> ");
+    rl.setPrompt("> ");
     rl.prompt();
   });
 
