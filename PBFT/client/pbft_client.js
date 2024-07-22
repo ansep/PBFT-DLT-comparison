@@ -2,6 +2,7 @@
 const net = require("net");
 const readline = require("readline");
 const crypto = require("crypto");
+const fs = require("fs");
 
 // List of nodes (servers) to connect to
 const nodes = [
@@ -13,6 +14,19 @@ const nodes = [
 
 let consensusState = {};
 let consensusReached = {};
+let privateKey;
+
+function signMessage(message) {
+  const privateKey = fs.readFileSync("private_key.pem", "utf8");
+  const signer = crypto.createSign("SHA256");
+  signer.update(JSON.stringify(message));
+  const signature = signer.sign(privateKey, "base64");
+
+  return {
+    message,
+    signature,
+  };
+}
 
 // Function to connect to a server and send a message
 async function sendMessage(node, message) {
@@ -28,14 +42,15 @@ async function sendMessage(node, message) {
       console.log(`Received reply from ${node.hostname}:${node.port}: ${data}`);
       // Handle the reply as needed
       const response = JSON.parse(data);
-      if (response.success) {
-        consensusState[message.message.seq].push(response);
+      if (response.body && response.body.success) {
+        consensusState[message.message.seq].push(response.transaction);
         if (
           !consensusReached[message.message.seq] &&
           consensusState[message.message.seq].length >=
             Math.floor((2 * nodes.length) / 3) + 1 &&
           consensusState[message.message.seq].every(
-            (value) => JSON.stringify(value) === JSON.stringify(response)
+            (value) =>
+              JSON.stringify(value) === JSON.stringify(response.transaction)
           )
         ) {
           console.log(
@@ -95,13 +110,16 @@ function startCli() {
             type: "request",
             data: transactionData,
             seq: seqNumber,
+            client: process.env.HOSTNAME,
           };
-          // Compute the hash of the message in SHA-256
-          const hash = crypto
-            .createHash("sha256")
-            .update(JSON.stringify({ data: transactionData, seq: seqNumber }))
-            .digest("hex");
-          responses.push(sendMessage(node, { message, hash }));
+          // Signature to ensure authentication and integrity
+          const signedMessage = signMessage(message);
+
+          // const hash = crypto
+          //   .createHash("sha256")
+          //   .update(JSON.stringify({ data: transactionData, seq: seqNumber }))
+          //   .digest("hex");
+          responses.push(sendMessage(node, signedMessage));
         });
 
         Promise.race([
@@ -110,9 +128,9 @@ function startCli() {
             console.log(
               `Transaction processed in ${end - seqNumber}ms. Response:`
             );
-            values.forEach((value) => {
-              console.log(`- ${value.node}: ${value.data}`);
-            });
+            // values.forEach((value) => {
+            //   console.log(`- ${value.node}: ${value.data}`);
+            // });
           }),
           new Promise((resolve, reject) => {
             setTimeout(() => reject("Timeout"), 10000);

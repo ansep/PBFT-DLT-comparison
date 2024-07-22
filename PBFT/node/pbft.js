@@ -6,6 +6,7 @@ const axios = require("axios");
 const net = require("net");
 const app = express();
 const crypto = require("crypto");
+const fs = require("fs");
 app.use(bodyParser.json());
 
 const nodes = [
@@ -26,12 +27,78 @@ let replies = {};
 let consensusReached = {};
 let socketClient = {};
 
+const privateKeyPath = "./privateKey.pem";
+const publicKeyPath = "./publicKey.pem";
+const clientPublicKeyPath = "./public_key_client.pem";
+const publicKeys = new Map(); // Store public keys with node address as key
+
+function generateKeys() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
+    modulusLength: 2048,
+  });
+  // Save the keys to files
+  fs.writeFileSync(
+    privateKeyPath,
+    privateKey.export({ type: "pkcs1", format: "pem" })
+  );
+  fs.writeFileSync(
+    publicKeyPath,
+    publicKey.export({ type: "spki", format: "pem" })
+  );
+}
+
+function keysExist() {
+  return fs.existsSync(privateKeyPath) && fs.existsSync(publicKeyPath);
+}
+
+function distributePublicKey() {
+  const publicKey = fs.readFileSync(publicKeyPath, "utf8");
+  nodes.forEach((node) => {
+    if (node !== `http://${process.env.HOSTNAME}:3000`) {
+      axios
+        .post(`${node}/receivePublicKey`, {
+          publicKey,
+          nodeAddress: `http://${process.env.HOSTNAME}:3000`,
+        })
+        .catch(console.error);
+    }
+  });
+}
+
+function initializeNode() {
+  if (!keysExist()) {
+    console.log("Generating new keys for the node...");
+    generateKeys();
+  }
+  setTimeout(distributePublicKey, 1000);
+}
+
+initializeNode();
+
 // Failure detection variables
 let lastPrimaryCheck = Date.now();
 const PRIMARY_CHECK_INTERVAL = 5000; // Check primary status every 5 seconds
 
 // Track which nodes are suspected faulty
 let faultyNodes = new Set();
+
+function signMessage(message) {
+  const privateKey = fs.readFileSync(privateKeyPath, "utf8");
+  const signer = crypto.createSign("SHA256");
+  signer.update(JSON.stringify(message));
+  const signature = signer.sign(privateKey, "base64");
+
+  return {
+    message,
+    signature,
+  };
+}
+
+function verifySignature(data, publicKey) {
+  const verifier = crypto.createVerify("SHA256");
+  verifier.update(JSON.stringify(data.message));
+  return verifier.verify(publicKey, data.signature, "base64");
+}
 
 function broadcast(message) {
   console.log(`Broadcasting message: ${JSON.stringify(message)}`);
@@ -51,77 +118,83 @@ function switchView() {
   console.log(`Switched to view ${view}. Primary: ${primary}`);
 }
 
-async function handleRequest(data, hash, seq, socket) {
+async function handleRequest(message, socket) {
+  const { type, data, seq, client } = message;
+  log.push({ type, data, seq, client });
+  console.log(
+    `TCP Message received: ${type}, Data: ${JSON.stringify(data)}, Seq: ${seq}`
+  );
+
   console.log("Handling Request");
-  console.log("Data", data);
   // Ensure consensusReached is initially set to false
   consensusReached[seq] = false;
   console.log(consensusReached[seq]);
   socketClient[seq] = socket;
+  const hash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify(message))
+    .digest("hex");
+
   try {
     // Check if the request is a transaction or a state request
     if (data.type === undefined) {
       if (isPrimary()) {
         console.log("Node is primary, broadcasting PrePrepare");
-        broadcast({
+
+        const body = {
           type: "pre-prepare",
-          data,
-          sent_by: `http://${process.env.HOSTNAME}:3000`,
-          hash,
+          client,
           seq,
-        });
+          hash,
+          sent_by: `http://${process.env.HOSTNAME}:3000`,
+        };
+        const { signature } = signMessage(body);
+
+        broadcast({ body, signature, message });
       }
-
-      //   // Await for consensus to be reached
-      //   await new Promise((resolve) => {
-      //     const interval = setInterval(() => {
-      //       if (consensusReached[seq]) {
-      //         clearInterval(interval);
-      //         resolve();
-      //       }
-      //     }, 1000); // Check every second for consensus
-
-      //     // Update balances in the database
-      //   });
-
-      //   updateBalancesInDatabase(from, to, amount, socket);
-      //   } else {
-      //     console.error(
-      //       `Insufficient balance for transaction: ${JSON.stringify(data)}`
-      //     );
-      //     socket.write(
-      //       `Insufficient balance for transaction: ${JSON.stringify(data)}`
-      //     );
-      //   }
     } else if (data.type === "get_state") {
       //TODO: do same way of transaction
       console.log("Node is primary, broadcasting PrePrepare for get_state");
       broadcast({ type: "pre-prepare", data, seq });
 
-      // Await for consensus to be reached
-      await new Promise((resolve) => {
-        const interval = setInterval(() => {
-          if (consensusReached[seq]) {
-            clearInterval(interval);
-            resolve();
-          }
-        }, 1000); // Check every second for consensus
+      // // Await for consensus to be reached
+      // await new Promise((resolve) => {
+      //   const interval = setInterval(() => {
+      //     if (consensusReached[seq]) {
+      //       clearInterval(interval);
+      //       resolve();
+      //     }
+      //   }, 1000); // Check every second for consensus
 
-        // Once consensus is reached, send current state response
-        const stateResponse = {
-          type: "state_response",
-          data: getCurrentState(), // Retrieve the current state from the database
-          seq: seq,
-        };
-        socket.write(JSON.stringify(stateResponse));
-      });
+      //   // Once consensus is reached, send current state response
+      //   const stateResponse = {
+      //     type: "state_response",
+      //     data: getCurrentState(), // Retrieve the current state from the database
+      //     seq: seq,
+      //   };
+      //   socket.write(JSON.stringify(stateResponse));
+      // });
     } else {
       console.error("Invalid request type:", data.type);
-      socket.write(`Invalid request type: ${data.type}`);
+      const errorMessage = {
+        body: {
+          type: "error",
+          message: `Invalid request type: ${data.type}`,
+          success: false,
+        },
+      };
+      socket.write(JSON.stringify(errorMessage));
     }
   } catch (error) {
     console.error("Error handling request:", error.message);
-    socket.write(`Error handling request: ${error.message}`);
+    const errorMessage = {
+      body: {
+        type: "error",
+        message: error.message,
+        success: false,
+      },
+    };
+    socket.write(errorMessage);
   }
 }
 
@@ -166,123 +239,141 @@ async function getBalance(account) {
   }
 }
 
-async function updateBalancesInDatabase(from, to, amount, socket) {
-  try {
-    console.log("Consensus reached for message ", {
-      transaction: { from, to, amount },
-    });
-    const message = {
-      type: "Reply",
-      success: true,
-      transaction: { from, to, amount },
-    };
-    socket.write(JSON.stringify(message));
-  } catch (error) {
-    console.error("Error updating balances:", error.message);
-    // Handle error appropriately, e.g., logging or sending an error message
-    const errorMessage = {
-      type: "Reply",
-      success: false,
-      error: error.message,
-    };
-    socket.write(JSON.stringify(errorMessage));
-  }
-}
+// async function updateBalancesInDatabase(from, to, amount, socket) {
+//   try {
+//     console.log("Consensus reached for message ", {
+//       transaction: { from, to, amount },
+//     });
+//     const message = {
+//       type: "Reply",
+//       success: true,
+//       transaction: { from, to, amount },
+//     };
+//     socket.write(JSON.stringify(message));
+//   } catch (error) {
+//     console.error("Error updating balances:", error.message);
+//     // Handle error appropriately, e.g., logging or sending an error message
+//     const errorMessage = {
+//       type: "Reply",
+//       success: false,
+//       error: error.message,
+//     };
+//     socket.write(JSON.stringify(errorMessage));
+//   }
+// }
 
-function handlePrePrepare(data, sent_by, hash, seq) {
+function handlePrePrepare(body, message) {
   console.log("Handling PrePrepare");
 
   // Verify that the pre-prepare message is sent by the current primary
-  // TODO: Check if is checking the view
-  if (sent_by === primary) {
+  // TODO: it has not accepted a pre-prepare message for view v
+  if (body.sent_by === primary) {
     console.log(
       "PrePrepare message is from the primary. Broadcasting prepare."
     );
-    broadcast({
+
+    const newBody = {
       type: "prepare",
       view,
-      seq,
-      hash,
+      seq: body.seq,
+      hash: body.hash,
       sent_by: `http://${process.env.HOSTNAME}:3000`,
-      data,
+    };
+    const { signature } = signMessage(newBody);
+
+    broadcast({
+      body: newBody,
+      signature,
+      message,
     });
   } else {
     console.warn(
-      `PrePrepare message not from primary. Ignored. Expected from: ${primary}, but got from: ${sent_by}`
+      `PrePrepare message not from primary. Ignored. Expected from: ${primary}, but got from: ${body.sent_by}`
     );
   }
 }
 
 let broadcastedCommits = {}; // Track broadcasted commit messages
 
-function handlePrepare(data, sent_by, hash, seq) {
-  //TODO: check view of prepare
+function handlePrepare(body, message) {
   console.log("Handling Prepare");
-  if (prepareCount[seq] === undefined) {
-    prepareCount[seq] = [sent_by];
+  if (prepareCount[body.seq] === undefined) {
+    prepareCount[body.seq] = [body.sent_by];
   } else {
-    if (!prepareCount[seq].includes(sent_by)) {
-      prepareCount[seq].push(sent_by);
+    if (!prepareCount[body.seq].includes(body.sent_by)) {
+      prepareCount[body.seq].push(body.sent_by);
     }
   }
-  console.log(`Prepare count for seq ${seq}: ${prepareCount[seq].length}`);
+  console.log(
+    `Prepare count for seq ${body.seq}: ${prepareCount[body.seq].length}`
+  );
 
   // Calculate the required prepare count to reach consensus
   const requiredPrepareCount = Math.floor((2 * (nodes.length - 1)) / 3);
 
-  if (prepareCount[seq].length >= requiredPrepareCount) {
+  if (prepareCount[body.seq].length >= requiredPrepareCount) {
     // Ensure the commit message is only broadcasted once
-    if (!broadcastedCommits[seq]) {
-      broadcastedCommits[seq] = true; // Mark the commit message as broadcasted
-      broadcast({
+    if (!broadcastedCommits[body.seq]) {
+      broadcastedCommits[body.seq] = true; // Mark the commit message as broadcasted
+
+      const newBody = {
         type: "commit",
         view,
-        seq,
-        hash,
+        seq: body.seq,
+        hash: body.hash,
         sent_by: `http://${process.env.HOSTNAME}:3000`,
-        data,
-      });
+      };
+      const { signature } = signMessage(newBody);
+      broadcast({ body: newBody, signature, message });
     } else {
-      console.log(`Commit message for seq ${seq} already broadcasted.`);
+      console.log(`Commit message for seq ${body.seq} already broadcasted.`);
     }
   }
 }
 
-async function handleCommit(data, sent_by, hash, seq) {
+async function handleCommit(body, message) {
   console.log("Handling Commit");
 
   // Initialize commit count for this sequence number if it doesn't exist
-  if (commitCount[seq] === undefined) {
-    commitCount[seq] = [sent_by];
+  if (commitCount[body.seq] === undefined) {
+    commitCount[body.seq] = [body.sent_by];
   } else {
-    if (!commitCount[seq].includes(sent_by)) {
-      commitCount[seq].push(sent_by);
+    if (!commitCount[body.seq].includes(body.sent_by)) {
+      commitCount[body.seq].push(body.sent_by);
     }
   }
-  console.log(`Commit count for seq ${seq}: ${commitCount[seq].length}`);
+  console.log(
+    `Commit count for seq ${body.seq}: ${commitCount[body.seq].length}`
+  );
 
   // Check if consensus is reached
-  if (commitCount[seq].length >= Math.floor((2 * (nodes.length - 1)) / 3)) {
-    if (!consensusReached[seq]) {
-      consensusReached[seq] = true;
-      console.log(consensusReached[seq]);
-      console.log("Socket seq commit", socketClient[seq]);
+  if (
+    commitCount[body.seq].length >= Math.floor((2 * (nodes.length - 1)) / 3)
+  ) {
+    if (!consensusReached[body.seq]) {
+      consensusReached[body.seq] = true;
+      console.log(consensusReached[body.seq]);
 
-      const { from, to, amount } = data; // Ensure `from`, `to`, and `amount` are correctly accessed from `data`
+      //Handle Reply
+      const { from, to, amount } = message.data; // Ensure `from`, `to`, and `amount` are correctly accessed from `data`
 
       const fromExists = await accountExists(from);
       const toExists = await accountExists(to);
 
       if (!fromExists || !toExists) {
         const errorMessage = {
-          type: "Reply",
-          success: false,
-          error: `One or more accounts do not exist`,
+          body: {
+            type: "Reply",
+            success: false,
+            error: `One or more accounts do not exist`,
+          },
         };
         console.error(`One or more accounts do not exist`);
-        socketClient[seq].write(JSON.stringify(errorMessage));
+        socketClient[body.seq].write(JSON.stringify(errorMessage));
         return;
       }
+
+      //TODO: check sequential order of requests from clients
 
       // Check balance before proceeding
       const fromBalance = await getBalance(from);
@@ -300,33 +391,49 @@ async function handleCommit(data, sent_by, hash, seq) {
           );
 
           // Send confirmation to the original requester (if socket is provided)
-          if (socketClient[seq]) {
-            const message = {
+          if (socketClient[body.seq]) {
+            // const message = {
+            //   type: "Reply",
+            //   success: true,
+            //   transaction: { from, to, amount },
+            // };
+            const newBody = {
               type: "Reply",
+              view,
+              seq: body.seq,
+              // client: message.message.client,
+              sent_by: `http://${process.env.HOSTNAME}:3000`,
               success: true,
               transaction: { from, to, amount },
             };
-            socketClient[seq].write(JSON.stringify(message));
+            // TODO: sign message and get all public keys from client from nodes at startup
+            socketClient[body.seq].write(
+              JSON.stringify({ body: newBody, signature: signMessage(newBody) })
+            );
           }
         } catch (error) {
           console.error("Error updating balances:", error.message);
           const errorMessage = {
-            type: "Reply",
-            success: false,
-            error: error.message,
+            body: {
+              type: "Reply",
+              success: false,
+              error: error.message,
+            },
           };
-          socketClient[seq].write(JSON.stringify(errorMessage));
+          socketClient[body.seq].write(JSON.stringify(errorMessage));
         }
       } else {
         console.error(
           `Insufficient balance for transaction: ${JSON.stringify(data)}`
         );
         const errorMessage = {
-          type: "Reply",
-          success: false,
-          error: `Insufficient balance for transaction: ${JSON.stringify(
-            data
-          )}`,
+          body: {
+            type: "Reply",
+            success: false,
+            error: `Insufficient balance for transaction: ${JSON.stringify(
+              data
+            )}`,
+          },
         };
         socketClient[seq].write(JSON.stringify(errorMessage));
       }
@@ -434,47 +541,108 @@ app.post("/transaction", async (req, res) => {
 });
 
 app.post("/message", (req, res) => {
-  const { type, data, sent_by, hash, seq } = req.body;
-  log.push({ type, data, seq });
-  console.log(
-    `Message received: ${type}, Data: ${JSON.stringify(
-      data
-    )}, Sent by: ${sent_by}, Seq: ${seq}, Hash: ${hash}`
-  );
-  // Check hash of received message
-  const computedHash = crypto
-    .createHash("sha256")
-    .update(JSON.stringify({ data, seq }))
-    .digest("hex");
-  if (computedHash !== req.body.hash) {
-    console.error(
-      `Hash mismatch. Expected ${req.body.hash}, but got ${computedHash}`
-    );
+  // check message is auth by public key associated with node sender
+  // broadcast({body: {
+  //   type: "pre-prepare",
+  //   client,
+  //   seq,
+  //   hash,
+  //   sent_by: `http://${process.env.HOSTNAME}:3000`,
+  // },
+  // signature, message);
+  const { body, signature, message } = req.body;
+  const publicKey = publicKeys.get(body.sent_by);
+  if (!publicKey) {
+    console.error(`Public key not found for node: ${body.sent_by}`);
+    return res.status(400).send("Public key not found");
   } else {
-    switch (type) {
-      case "pre-prepare":
-        handlePrePrepare(data, sent_by, hash, seq);
-        break;
-      case "prepare":
-        handlePrepare(data, sent_by, hash, seq);
-        break;
-      case "commit":
-        handleCommit(data, sent_by, hash, seq);
-        break;
-      case "reply":
-        handleReply(data, sent_by, hash, seq);
-        break;
-      case "get_state":
-        // Send the current state back
-        const responseMessage = {
-          type: "state_response",
-          data: currentState,
-          seq: seq,
-        };
-        res.json(responseMessage);
-        break;
+    if (!verifySignature({ message: body, signature }, publicKey)) {
+      console.error("Invalid signature. Message not authenticated.");
+      return res.status(400).send("Invalid signature");
+    } else {
+      // const { type, data, sent_by, hash, seq } = message;
+
+      // log.push({ type, data, seq });
+      // console.log(
+      //   `Message received: ${type}, Data: ${JSON.stringify(
+      //     data
+      //   )}, Sent by: ${sent_by}, Seq: ${seq}, Hash: ${hash}`
+      // );
+      // Check hash of received message
+      const computedHash = crypto
+        .createHash("sha256")
+        .update(JSON.stringify(message))
+        .digest("hex");
+      if (computedHash !== body.hash) {
+        console.error(
+          `Hash mismatch. Expected ${body.hash}, but got ${computedHash}`
+        );
+      } else {
+        // if (
+        //   !verifySignature(
+        //     message,
+        //     fs.readFileSync(clientPublicKeyPath, "utf8")
+        //   )
+        // ) {
+        //   console.error("Invalid signature. Message not authenticated.");
+        //   const errorMessage = {
+        //     type: "error",
+        //     message: "Invalid signature",
+        //     success: false,
+        //   };
+        //   socket.write(JSON.stringify(errorMessage));
+        // } else {
+        // TODO: Check if it is in view v
+        const timeNow = Date.now();
+        // Check if the sequence number is within the expected range
+        if (body.seq < timeNow - 900000 || body.seq > timeNow + 900000) {
+          console.error(
+            `Message seq ${body.seq} outside of expected range. Ignoring message.`
+          );
+          return res.status(400).send("Invalid sequence number");
+        } else {
+          switch (body.type) {
+            case "pre-prepare":
+              handlePrePrepare(body, message);
+              break;
+            case "prepare":
+              handlePrepare(body, message);
+              break;
+            case "commit":
+              handleCommit(body, message);
+              break;
+            // case "reply":
+            //   handleReply(body, message);
+            //   break;
+            case "get_state":
+              // Send the current state back
+              const responseMessage = {
+                type: "state_response",
+                data: currentState,
+                seq: seq,
+              };
+              res.json(responseMessage);
+              break;
+          }
+          res.sendStatus(200);
+        }
+        // }
+      }
     }
-    res.sendStatus(200);
+  }
+});
+
+app.post("/receivePublicKey", (req, res) => {
+  const { publicKey, nodeAddress } = req.body; // Assuming nodeAddress is sent to identify the node
+  if (publicKey && nodeAddress) {
+    // Validate publicKey if necessary
+    publicKeys.set(nodeAddress, publicKey);
+    console.log(`Public key received and stored for node: ${nodeAddress}`);
+    res.status(200).send("Public key stored successfully.");
+  } else {
+    res
+      .status(400)
+      .send("Invalid request. Public key or node address missing.");
   }
 });
 
@@ -485,45 +653,27 @@ setInterval(checkPrimaryHealth, PRIMARY_CHECK_INTERVAL);
 const tcpServer = net.createServer((socket) => {
   socket.on("data", (data) => {
     try {
-      const message = JSON.parse(data).message;
-      const hash = JSON.parse(data).hash;
-      const { type, data: msgData, seq } = message;
-      log.push({ type, data: msgData, seq });
-      console.log(
-        `TCP Message received: ${type}, Data: ${JSON.stringify(
-          msgData
-        )}, Seq: ${seq}, Hash: ${hash}`
-      );
-
-      // Check hash of received message
-      const computedHash = crypto
-        .createHash("sha256")
-        .update(JSON.stringify({ data: msgData, seq }))
-        .digest("hex");
-      if (computedHash !== hash) {
-        console.error(
-          `Hash mismatch. Expected ${hash}, but got ${computedHash}`
-        );
+      const message = JSON.parse(data);
+      if (
+        !verifySignature(message, fs.readFileSync(clientPublicKeyPath, "utf8"))
+      ) {
+        console.error("Invalid signature. Message not authenticated.");
+        const errorMessage = {
+          body: {
+            type: "error",
+            message: "Invalid signature",
+            success: false,
+          },
+        };
+        socket.write(JSON.stringify(errorMessage));
       } else {
-        switch (type) {
+        switch (message.message.type) {
           case "request":
-            handleRequest(msgData, hash, seq, socket);
+            handleRequest(message.message, socket);
             break;
-          case "pre-prepare":
-            handlePrePrepare(msgData, seq);
-            break;
-          case "prepare":
-            handlePrepare(msgData, seq);
-            break;
-          case "commit":
-            handleCommit(msgData, seq);
-            break;
-          case "reply":
-            handleReply(msgData, seq);
-            break;
-          case "get_state":
-            handleRequest(message, seq, socket);
-            break;
+          // case "get_state":
+          //   handleRequest(message, seq, socket);
+          //   break;
         }
       }
     } catch (err) {
