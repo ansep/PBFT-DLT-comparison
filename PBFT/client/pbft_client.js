@@ -104,40 +104,39 @@ function startCli() {
 
         consensusState[seqNumber] = [];
         consensusReached[seqNumber] = false;
+        const message = {
+          type: "request",
+          data: transactionData,
+          seq: seqNumber,
+          client: process.env.HOSTNAME,
+        };
+        // Signature to ensure authentication and integrity
+        const signedMessage = signMessage(message);
         // Send the transaction request to all nodes
         nodes.forEach((node) => {
-          const message = {
-            type: "request",
-            data: transactionData,
-            seq: seqNumber,
-            client: process.env.HOSTNAME,
-          };
-          // Signature to ensure authentication and integrity
-          const signedMessage = signMessage(message);
-
-          // const hash = crypto
-          //   .createHash("sha256")
-          //   .update(JSON.stringify({ data: transactionData, seq: seqNumber }))
-          //   .digest("hex");
           responses.push(sendMessage(node, signedMessage));
         });
+        try {
+          console.log("Transaction sent. Waiting for consensus...");
 
-        Promise.race([
-          Promise.all(responses).then((values) => {
-            const end = new Date().getTime();
-            console.log(
-              `Transaction processed in ${end - seqNumber}ms. Response:`
-            );
-            // values.forEach((value) => {
-            //   console.log(`- ${value.node}: ${value.data}`);
-            // });
-          }),
-          new Promise((resolve, reject) => {
-            setTimeout(() => reject("Timeout"), 10000);
-          }),
-        ]).catch((err) => {
-          console.error(`Transaction failed or timed out: ${err}`);
-        });
+          Promise.race([
+            Promise.all(responses).then((values) => {
+              const end = new Date().getTime();
+              console.log(
+                `Transaction processed in ${end - seqNumber}ms. Response:`
+              );
+              // values.forEach((value) => {
+              //   console.log(`- ${value.node}: ${value.data}`);
+              // });
+            }),
+            new Promise((resolve, reject) => {
+              // Timeout after 10 seconds after which the transaction is considered failed
+              setTimeout(() => reject("Timeout"), 10000);
+            }),
+          ]);
+        } catch (err) {
+          console.error(`Transaction failed or timed out!`);
+        }
       } else {
         console.error(
           "Invalid transaction command. Usage: send transaction <from> <to> <amount>"

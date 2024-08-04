@@ -32,6 +32,9 @@ const publicKeyPath = "./publicKey.pem";
 const clientPublicKeyPath = "./public_key_client.pem";
 const publicKeys = new Map(); // Store public keys with node address as key
 
+// Calculate the required prepare count to reach consensus
+const requiredPrepareCount = Math.floor((2 * (nodes.length - 1)) / 3);
+
 function generateKeys() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
     modulusLength: 2048,
@@ -54,14 +57,14 @@ function keysExist() {
 function distributePublicKey() {
   const publicKey = fs.readFileSync(publicKeyPath, "utf8");
   nodes.forEach((node) => {
-    if (node !== `http://${process.env.HOSTNAME}:3000`) {
-      axios
-        .post(`${node}/receivePublicKey`, {
-          publicKey,
-          nodeAddress: `http://${process.env.HOSTNAME}:3000`,
-        })
-        .catch(console.error);
-    }
+    // if (node !== `http://${process.env.HOSTNAME}:3000`) {
+    axios
+      .post(`${node}/receivePublicKey`, {
+        publicKey,
+        nodeAddress: `http://${process.env.HOSTNAME}:3000`,
+      })
+      .catch(console.error);
+    // }
   });
 }
 
@@ -76,8 +79,8 @@ function initializeNode() {
 initializeNode();
 
 // Failure detection variables
-let lastPrimaryCheck = Date.now();
-const PRIMARY_CHECK_INTERVAL = 5000; // Check primary status every 5 seconds
+let lastHealthCheck = Date.now();
+const HEALTH_CHECK_INTERVAL = 5000; // Check nodes health every 5 seconds
 
 // Track which nodes are suspected faulty
 let faultyNodes = new Set();
@@ -104,7 +107,8 @@ function broadcast(message) {
   console.log(`Broadcasting message: ${JSON.stringify(message)}`);
   nodes.forEach((node) => {
     if (
-      node !== `http://${process.env.HOSTNAME}:3000` &&
+      // Considering broadcast also to self
+      // node !== `http://${process.env.HOSTNAME}:3000` &&
       !faultyNodes.has(node)
     ) {
       axios.post(`${node}/message`, message).catch(console.error);
@@ -113,12 +117,16 @@ function broadcast(message) {
 }
 
 function switchView() {
-  view = (view + 1) % nodes.length;
+  // Find next view that is not faulty
+  while (faultyNodes.has(nodes[view])) {
+    view = (view + 1) % nodes.length;
+  }
   primary = nodes[view];
   console.log(`Switched to view ${view}. Primary: ${primary}`);
 }
 
-async function handleRequest(message, socket) {
+async function handleRequest(clientSignedMessage, socket) {
+  const { message, signature } = clientSignedMessage;
   const { type, data, seq, client } = message;
   log.push({ type, data, seq, client });
   console.log(
@@ -150,7 +158,7 @@ async function handleRequest(message, socket) {
         };
         const { signature } = signMessage(body);
 
-        broadcast({ body, signature, message });
+        broadcast({ body, signature, clientSignedMessage });
       }
     } else if (data.type === "get_state") {
       //TODO: do same way of transaction
@@ -262,7 +270,7 @@ async function getBalance(account) {
 //   }
 // }
 
-function handlePrePrepare(body, message) {
+function handlePrePrepare(body, clientSignedMessage) {
   console.log("Handling PrePrepare");
 
   // Verify that the pre-prepare message is sent by the current primary
@@ -284,7 +292,7 @@ function handlePrePrepare(body, message) {
     broadcast({
       body: newBody,
       signature,
-      message,
+      clientSignedMessage,
     });
   } else {
     console.warn(
@@ -295,7 +303,7 @@ function handlePrePrepare(body, message) {
 
 let broadcastedCommits = {}; // Track broadcasted commit messages
 
-function handlePrepare(body, message) {
+function handlePrepare(body, clientSignedMessage) {
   console.log("Handling Prepare");
   if (prepareCount[body.seq] === undefined) {
     prepareCount[body.seq] = [body.sent_by];
@@ -307,9 +315,6 @@ function handlePrepare(body, message) {
   console.log(
     `Prepare count for seq ${body.seq}: ${prepareCount[body.seq].length}`
   );
-
-  // Calculate the required prepare count to reach consensus
-  const requiredPrepareCount = Math.floor((2 * (nodes.length - 1)) / 3);
 
   if (prepareCount[body.seq].length >= requiredPrepareCount) {
     // Ensure the commit message is only broadcasted once
@@ -324,16 +329,15 @@ function handlePrepare(body, message) {
         sent_by: `http://${process.env.HOSTNAME}:3000`,
       };
       const { signature } = signMessage(newBody);
-      broadcast({ body: newBody, signature, message });
+      broadcast({ body: newBody, signature, clientSignedMessage });
     } else {
       console.log(`Commit message for seq ${body.seq} already broadcasted.`);
     }
   }
 }
 
-async function handleCommit(body, message) {
+async function handleCommit(body, clientSignedMessage) {
   console.log("Handling Commit");
-
   // Initialize commit count for this sequence number if it doesn't exist
   if (commitCount[body.seq] === undefined) {
     commitCount[body.seq] = [body.sent_by];
@@ -347,95 +351,104 @@ async function handleCommit(body, message) {
   );
 
   // Check if consensus is reached
-  if (
-    commitCount[body.seq].length >= Math.floor((2 * (nodes.length - 1)) / 3)
-  ) {
-    if (!consensusReached[body.seq]) {
-      consensusReached[body.seq] = true;
-      console.log(consensusReached[body.seq]);
+  // TODO: check that preparedCount is true
 
-      //Handle Reply
-      const { from, to, amount } = message.data; // Ensure `from`, `to`, and `amount` are correctly accessed from `data`
+  if (prepareCount[body.seq].length >= requiredPrepareCount) {
+    if (
+      commitCount[body.seq].length >=
+      Math.floor((2 * (nodes.length - 1)) / 3 + 1)
+    ) {
+      if (!consensusReached[body.seq]) {
+        consensusReached[body.seq] = true;
+        console.log(consensusReached[body.seq]);
 
-      const fromExists = await accountExists(from);
-      const toExists = await accountExists(to);
+        //Handle Reply
+        const { from, to, amount } = clientSignedMessage.message.data; // Ensure `from`, `to`, and `amount` are correctly accessed from `data`
 
-      if (!fromExists || !toExists) {
-        const errorMessage = {
-          body: {
-            type: "Reply",
-            success: false,
-            error: `One or more accounts do not exist`,
-          },
-        };
-        console.error(`One or more accounts do not exist`);
-        socketClient[body.seq].write(JSON.stringify(errorMessage));
-        return;
-      }
+        const fromExists = await accountExists(from);
+        const toExists = await accountExists(to);
 
-      //TODO: check sequential order of requests from clients
-
-      // Check balance before proceeding
-      const fromBalance = await getBalance(from);
-
-      if (fromBalance >= amount) {
-        try {
-          console.log(`Updating database: ${amount} from ${from} to ${to}`);
-          db.query(
-            "UPDATE state SET balance = balance - ? WHERE username = ?",
-            [amount, from]
-          );
-          db.query(
-            "UPDATE state SET balance = balance + ? WHERE username = ?",
-            [amount, to]
-          );
-
-          // Send confirmation to the original requester (if socket is provided)
-          if (socketClient[body.seq]) {
-            // const message = {
-            //   type: "Reply",
-            //   success: true,
-            //   transaction: { from, to, amount },
-            // };
-            const newBody = {
-              type: "Reply",
-              view,
-              seq: body.seq,
-              // client: message.message.client,
-              sent_by: `http://${process.env.HOSTNAME}:3000`,
-              success: true,
-              transaction: { from, to, amount },
-            };
-            // TODO: sign message and get all public keys from client from nodes at startup
-            socketClient[body.seq].write(
-              JSON.stringify({ body: newBody, signature: signMessage(newBody) })
-            );
-          }
-        } catch (error) {
-          console.error("Error updating balances:", error.message);
+        if (!fromExists || !toExists) {
           const errorMessage = {
             body: {
               type: "Reply",
               success: false,
-              error: error.message,
+              error: `One or more accounts do not exist`,
             },
           };
+          console.error(`One or more accounts do not exist`);
           socketClient[body.seq].write(JSON.stringify(errorMessage));
+          return;
         }
-      } else {
-        console.error(
-          `Insufficient balance for transaction: ${JSON.stringify(data)}`
-        );
-        const errorMessage = {
-          body: {
-            type: "Reply",
-            success: false,
-            error: `Insufficient balance for transaction: ${JSON.stringify(
-              data
-            )}`,
-          },
-        };
-        socketClient[seq].write(JSON.stringify(errorMessage));
+
+        //TODO: check sequential order of requests from clients
+
+        // Check balance before proceeding
+        const fromBalance = await getBalance(from);
+
+        if (fromBalance >= amount) {
+          try {
+            console.log(`Updating database: ${amount} from ${from} to ${to}`);
+            db.query(
+              "UPDATE state SET balance = balance - ? WHERE username = ?",
+              [amount, from]
+            );
+            db.query(
+              "UPDATE state SET balance = balance + ? WHERE username = ?",
+              [amount, to]
+            );
+
+            // Send confirmation to the original requester (if socket is provided)
+            if (socketClient[body.seq]) {
+              // const message = {
+              //   type: "Reply",
+              //   success: true,
+              //   transaction: { from, to, amount },
+              // };
+              const newBody = {
+                type: "Reply",
+                view,
+                seq: body.seq,
+                sent_by: `http://${process.env.HOSTNAME}:3000`,
+                success: true,
+                transaction: { from, to, amount },
+              };
+              // TODO: sign message and get all public keys from client from nodes at startup
+              socketClient[body.seq].write(
+                JSON.stringify({
+                  body: newBody,
+                  signature: signMessage(newBody),
+                })
+              );
+            }
+          } catch (error) {
+            console.error("Error updating balances:", error.message);
+            const errorMessage = {
+              body: {
+                type: "Reply",
+                success: false,
+                error: error.message,
+              },
+            };
+            socketClient[body.seq].write(JSON.stringify(errorMessage));
+          }
+        } else {
+          console.error(
+            `Insufficient balance for transaction: ${JSON.stringify(
+              clientSignedMessage.message.data
+            )}`
+          );
+          const errorMessage = {
+            body: {
+              type: "Reply",
+              success: false,
+              error: `Insufficient balance for transaction: ${JSON.stringify(
+                clientSignedMessage.message.data
+              )}`,
+            },
+          };
+          socketClient[seq].write(JSON.stringify(errorMessage));
+        }
       }
     }
   }
@@ -454,30 +467,31 @@ function isPrimary() {
   return `http://${process.env.HOSTNAME}:3000` === primary;
 }
 
-function checkPrimaryHealth() {
+function checkNodesHealth() {
   const now = Date.now();
-  if (
-    now - lastPrimaryCheck >= PRIMARY_CHECK_INTERVAL &&
-    primary !== `http://${process.env.HOSTNAME}:3000`
-  ) {
-    lastPrimaryCheck = now;
-    axios
-      .get(`${primary}/health`) // Adjust to your actual health endpoint path
-      .then((response) => {
-        // Primary responded, reset suspicion
-        if (faultyNodes.has(primary)) {
-          console.log(`Primary ${primary} recovered`);
-          faultyNodes.delete(primary);
-        }
-      })
-      .catch((error) => {
-        // Primary didn't respond, mark as faulty
-        if (!faultyNodes.has(primary)) {
-          faultyNodes.add(primary);
-          console.error(`Primary ${primary} suspected faulty`);
-          switchView();
-        }
-      });
+  if (now - lastHealthCheck >= HEALTH_CHECK_INTERVAL) {
+    lastHealthCheck = now;
+    nodes.forEach((node) => {
+      axios
+        .get(`${node}/health`)
+        .then((response) => {
+          // Node responded, reset suspicion
+          if (faultyNodes.has(node)) {
+            console.log(`Node ${node} recovered`);
+            faultyNodes.delete(node);
+          }
+        })
+        .catch((error) => {
+          // Node didn't respond, mark as faulty
+          if (!faultyNodes.has(node)) {
+            faultyNodes.add(node);
+            console.error(`Node ${node} suspected faulty`);
+            if (node === primary) {
+              switchView();
+            }
+          }
+        });
+    });
   }
 }
 
@@ -541,16 +555,7 @@ app.post("/transaction", async (req, res) => {
 });
 
 app.post("/message", (req, res) => {
-  // check message is auth by public key associated with node sender
-  // broadcast({body: {
-  //   type: "pre-prepare",
-  //   client,
-  //   seq,
-  //   hash,
-  //   sent_by: `http://${process.env.HOSTNAME}:3000`,
-  // },
-  // signature, message);
-  const { body, signature, message } = req.body;
+  const { body, signature, clientSignedMessage } = req.body;
   const publicKey = publicKeys.get(body.sent_by);
   if (!publicKey) {
     console.error(`Public key not found for node: ${body.sent_by}`);
@@ -560,73 +565,70 @@ app.post("/message", (req, res) => {
       console.error("Invalid signature. Message not authenticated.");
       return res.status(400).send("Invalid signature");
     } else {
-      // const { type, data, sent_by, hash, seq } = message;
+      console.log("Tried public key for node:", body.sent_by, "and verified");
 
-      // log.push({ type, data, seq });
-      // console.log(
-      //   `Message received: ${type}, Data: ${JSON.stringify(
-      //     data
-      //   )}, Sent by: ${sent_by}, Seq: ${seq}, Hash: ${hash}`
-      // );
       // Check hash of received message
       const computedHash = crypto
         .createHash("sha256")
-        .update(JSON.stringify(message))
+        .update(JSON.stringify(clientSignedMessage.message))
         .digest("hex");
       if (computedHash !== body.hash) {
         console.error(
           `Hash mismatch. Expected ${body.hash}, but got ${computedHash}`
         );
       } else {
-        // if (
-        //   !verifySignature(
-        //     message,
-        //     fs.readFileSync(clientPublicKeyPath, "utf8")
-        //   )
-        // ) {
-        //   console.error("Invalid signature. Message not authenticated.");
-        //   const errorMessage = {
-        //     type: "error",
-        //     message: "Invalid signature",
-        //     success: false,
-        //   };
-        //   socket.write(JSON.stringify(errorMessage));
-        // } else {
-        // TODO: Check if it is in view v
-        const timeNow = Date.now();
-        // Check if the sequence number is within the expected range
-        if (body.seq < timeNow - 900000 || body.seq > timeNow + 900000) {
-          console.error(
-            `Message seq ${body.seq} outside of expected range. Ignoring message.`
-          );
-          return res.status(400).send("Invalid sequence number");
+        if (
+          !verifySignature(
+            clientSignedMessage,
+            fs.readFileSync(clientPublicKeyPath, "utf8")
+          )
+        ) {
+          console.error("Invalid signature. Message not authenticated.");
+          console.log(clientSignedMessage);
+          // const errorMessage = {
+          //   type: "error",
+          //   message: "Invalid signature",
+          //   success: false,
+          // };
+          // socket.write(JSON.stringify(errorMessage)); // socket variable undefined
         } else {
-          switch (body.type) {
-            case "pre-prepare":
-              handlePrePrepare(body, message);
-              break;
-            case "prepare":
-              handlePrepare(body, message);
-              break;
-            case "commit":
-              handleCommit(body, message);
-              break;
-            // case "reply":
-            //   handleReply(body, message);
-            //   break;
-            case "get_state":
-              // Send the current state back
-              const responseMessage = {
-                type: "state_response",
-                data: currentState,
-                seq: seq,
-              };
-              res.json(responseMessage);
-              break;
+          // TODO: Check if it is in view v
+          const timeNow = Date.now();
+          // Check if the sequence number is within the expected range
+          if (body.seq < timeNow - 900000 || body.seq > timeNow + 900000) {
+            console.error(
+              `Message seq ${body.seq} outside of expected range. Ignoring message.`
+            );
+            return res.status(400).send("Invalid sequence number");
+          } else {
+            switch (body.type) {
+              case "pre-prepare":
+                // TODO:
+                // The message is processed only if no other message with same view and sequence number has been processed
+                handlePrePrepare(body, clientSignedMessage);
+                break;
+              case "prepare":
+                handlePrepare(body, clientSignedMessage);
+                break;
+              case "commit":
+                handleCommit(body, clientSignedMessage);
+                break;
+              // case "reply":
+              //   handleReply(body, clientSignedMessage);
+              //   break;
+              case "get_state":
+                // Send the current state back
+                const responseMessage = {
+                  type: "state_response",
+                  data: currentState,
+                  seq: seq,
+                };
+                res.json(responseMessage);
+                break;
+            }
+            res.sendStatus(200);
           }
-          res.sendStatus(200);
         }
-        // }
       }
     }
   }
@@ -646,16 +648,20 @@ app.post("/receivePublicKey", (req, res) => {
   }
 });
 
-// Periodically check primary health
-setInterval(checkPrimaryHealth, PRIMARY_CHECK_INTERVAL);
+// Periodically check nodes health
+// setInterval(checkPrimaryHealth, PRIMARY_CHECK_INTERVAL);
+setInterval(checkNodesHealth, HEALTH_CHECK_INTERVAL);
 
 // TCP Server to receive messages from client
 const tcpServer = net.createServer((socket) => {
   socket.on("data", (data) => {
     try {
-      const message = JSON.parse(data);
+      const clientSignedMessage = JSON.parse(data);
       if (
-        !verifySignature(message, fs.readFileSync(clientPublicKeyPath, "utf8"))
+        !verifySignature(
+          clientSignedMessage,
+          fs.readFileSync(clientPublicKeyPath, "utf8")
+        )
       ) {
         console.error("Invalid signature. Message not authenticated.");
         const errorMessage = {
@@ -667,9 +673,9 @@ const tcpServer = net.createServer((socket) => {
         };
         socket.write(JSON.stringify(errorMessage));
       } else {
-        switch (message.message.type) {
+        switch (clientSignedMessage.message.type) {
           case "request":
-            handleRequest(message.message, socket);
+            handleRequest(clientSignedMessage, socket);
             break;
           // case "get_state":
           //   handleRequest(message, seq, socket);
