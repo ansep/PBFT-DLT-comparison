@@ -131,7 +131,7 @@ function startCli() {
             }),
             new Promise((resolve, reject) => {
               // Timeout after 10 seconds after which the transaction is considered failed
-              setTimeout(() => reject("Timeout"), 10000);
+              setTimeout(() => reject("Timeout"), 20000);
             }),
           ]);
         } catch (err) {

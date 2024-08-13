@@ -16,15 +16,25 @@ const nodes = [
   "http://node4:3000",
 ];
 
+// To have first primary as faulty, put at false if you want normal behaviour
+let faulty_example = false;
+if (`http://${process.env.HOSTNAME}:3000` == "http://node1:3000"){
+  faulty_example = true
+} else{
+  faulty_example = false
+}
+
 let currentState = {};
 let log = [];
 let view = 0; // View number
 let primary = nodes[view % nodes.length];
 let sequenceNumber = 0; // Message sequence number
+let prePrepareCount = {};
 let prepareCount = {};
 let commitCount = {};
 let replies = {};
 let consensusReached = {};
+let faultyNodes = new Set();
 let socketClient = {};
 
 const privateKeyPath = "./privateKey.pem";
@@ -70,7 +80,7 @@ function distributePublicKey() {
 
 function initializeNode() {
   if (!keysExist()) {
-    console.log("Generating new keys for the node...");
+    // console.log("Generating new keys for the node...");
     generateKeys();
   }
   setTimeout(distributePublicKey, 1000);
@@ -80,10 +90,10 @@ initializeNode();
 
 // Failure detection variables
 let lastHealthCheck = Date.now();
-const HEALTH_CHECK_INTERVAL = 5000; // Check nodes health every 5 seconds
+const HEALTH_CHECK_INTERVAL = 10000; // Check nodes health every 5 seconds
 
 // Track which nodes are suspected faulty
-let faultyNodes = new Set();
+let crashedNodes = new Set();
 
 function signMessage(message) {
   const privateKey = fs.readFileSync(privateKeyPath, "utf8");
@@ -109,7 +119,7 @@ function broadcast(message) {
     if (
       // Considering broadcast also to self
       // node !== `http://${process.env.HOSTNAME}:3000` &&
-      !faultyNodes.has(node)
+      !crashedNodes.has(node)
     ) {
       axios.post(`${node}/message`, message).catch(console.error);
     }
@@ -118,12 +128,48 @@ function broadcast(message) {
 
 function switchView() {
   // Find next view that is not faulty
-  while (faultyNodes.has(nodes[view])) {
+  while (crashedNodes.has(nodes[view]) || faultyNodes.has(nodes[view])) {
     view = (view + 1) % nodes.length;
   }
   primary = nodes[view];
   console.log(`Switched to view ${view}. Primary: ${primary}`);
 }
+
+function sendFaultyMessage(clientSignedMessage) {
+  faulty_example = false
+  const { message, signature } = clientSignedMessage;
+  const { type, data, seq, client } = message;
+  const hash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify(message))
+    .digest("hex");
+  let i = 0;
+  nodes.forEach((node) => {
+    const modifiedSeq = seq + i; // Cambia il seq per ogni nodo
+    const body = {
+      type: "pre-prepare",
+      client,
+      seq: modifiedSeq,
+      hash,
+      sent_by: `http://${process.env.HOSTNAME}:3000`,
+    };
+    const { signature } = signMessage(body);
+    broadcastToNode(node, { body, signature, clientSignedMessage });
+    i += 1;
+  });
+}
+
+function broadcastToNode(node, message) {
+  console.log(`Broadcasting message: ${JSON.stringify(message)}`);
+  if (
+      // Considering broadcast also to self
+      // node !== `http://${process.env.HOSTNAME}:3000` &&
+      !crashedNodes.has(node)
+    ) {
+      axios.post(`${node}/message`, message).catch(console.error);
+    };
+}
+
 
 async function handleRequest(clientSignedMessage, socket) {
   const { message, signature } = clientSignedMessage;
@@ -142,46 +188,40 @@ async function handleRequest(clientSignedMessage, socket) {
     .createHash("sha256")
     .update(JSON.stringify(message))
     .digest("hex");
-
   try {
+
+    setTimeout(() => {
+      if (!consensusReached[seq]) {
+        console.log("Timeout reached. Consensus not achieved.");
+        if (isPrimary()) {
+          handleRequest_afterFaulty(clientSignedMessage);
+        }
+      }
+    }, 10000);
+
     // Check if the request is a transaction or a state request
     if (data.type === undefined) {
       if (isPrimary()) {
         console.log("Node is primary, broadcasting PrePrepare");
+        if (faulty_example == false){
+          const body = {
+            type: "pre-prepare",
+            client,
+            seq,
+            hash,
+            sent_by: `http://${process.env.HOSTNAME}:3000`,
+          };
+          const { signature } = signMessage(body);
 
-        const body = {
-          type: "pre-prepare",
-          client,
-          seq,
-          hash,
-          sent_by: `http://${process.env.HOSTNAME}:3000`,
-        };
-        const { signature } = signMessage(body);
-
-        broadcast({ body, signature, clientSignedMessage });
+          broadcast({ body, signature, clientSignedMessage });
+        } else {
+          sendFaultyMessage(clientSignedMessage);
+        }
       }
     } else if (data.type === "get_state") {
       //TODO: do same way of transaction
       console.log("Node is primary, broadcasting PrePrepare for get_state");
       broadcast({ type: "pre-prepare", data, seq });
-
-      // // Await for consensus to be reached
-      // await new Promise((resolve) => {
-      //   const interval = setInterval(() => {
-      //     if (consensusReached[seq]) {
-      //       clearInterval(interval);
-      //       resolve();
-      //     }
-      //   }, 1000); // Check every second for consensus
-
-      //   // Once consensus is reached, send current state response
-      //   const stateResponse = {
-      //     type: "state_response",
-      //     data: getCurrentState(), // Retrieve the current state from the database
-      //     seq: seq,
-      //   };
-      //   socket.write(JSON.stringify(stateResponse));
-      // });
     } else {
       console.error("Invalid request type:", data.type);
       const errorMessage = {
@@ -247,28 +287,69 @@ async function getBalance(account) {
   }
 }
 
-// async function updateBalancesInDatabase(from, to, amount, socket) {
-//   try {
-//     console.log("Consensus reached for message ", {
-//       transaction: { from, to, amount },
-//     });
-//     const message = {
-//       type: "Reply",
-//       success: true,
-//       transaction: { from, to, amount },
-//     };
-//     socket.write(JSON.stringify(message));
-//   } catch (error) {
-//     console.error("Error updating balances:", error.message);
-//     // Handle error appropriately, e.g., logging or sending an error message
-//     const errorMessage = {
-//       type: "Reply",
-//       success: false,
-//       error: error.message,
-//     };
-//     socket.write(JSON.stringify(errorMessage));
-//   }
-// }
+function handleRequest_afterFaulty(clientSignedMessage) {
+  const { message, signature } = clientSignedMessage;
+  const { type, data, seq, client } = message;
+  log.push({ type, data, seq, client });
+  //console.log(
+  //  `TCP Message received: ${type}, Data: ${JSON.stringify(data)}, Seq: ${seq}`
+  //);
+
+  console.log("Handling Request again after the view chnage");
+  // Ensure consensusReached is initially set to false
+  consensusReached[seq] = false;
+  console.log(consensusReached[seq]);
+  const hash = crypto
+    .createHash("sha256")
+    .update(JSON.stringify(message))
+    .digest("hex");
+  try {
+    // Check if the request is a transaction or a state request
+    if (data.type === undefined) {
+      if (isPrimary()) {
+        console.log("Node is primary, broadcasting PrePrepare");
+        if (faulty_example == false){
+          const body = {
+            type: "pre-prepare",
+            client,
+            seq,
+            hash,
+            sent_by: `http://${process.env.HOSTNAME}:3000`,
+          };
+          const { signature } = signMessage(body);
+
+          broadcast({ body, signature, clientSignedMessage });
+        } else {
+          sendFaultyMessage(clientSignedMessage);
+        }
+      }
+    } else if (data.type === "get_state") {
+      //TODO: do same way of transaction
+      console.log("Node is primary, broadcasting PrePrepare for get_state");
+      broadcast({ type: "pre-prepare", data, seq });
+    } else {
+      console.error("Invalid request type:", data.type);
+      const errorMessage = {
+        body: {
+          type: "error",
+          message: `Invalid request type: ${data.type}`,
+          success: false,
+        },
+      };
+      socketClient[seq].write(JSON.stringify(errorMessage));
+    }
+  } catch (error) {
+    console.error("Error handling request:", error.message);
+    const errorMessage = {
+      body: {
+        type: "error",
+        message: error.message,
+        success: false,
+      },
+    };
+    socketClient[seq].write(errorMessage);
+  }
+}
 
 function handlePrePrepare(body, clientSignedMessage) {
   console.log("Handling PrePrepare");
@@ -279,21 +360,47 @@ function handlePrePrepare(body, clientSignedMessage) {
     console.log(
       "PrePrepare message is from the primary. Broadcasting prepare."
     );
+    if (body.seq in consensusReached) {
 
-    const newBody = {
-      type: "prepare",
-      view,
-      seq: body.seq,
-      hash: body.hash,
-      sent_by: `http://${process.env.HOSTNAME}:3000`,
-    };
-    const { signature } = signMessage(newBody);
+      if (prePrepareCount[body.seq] === undefined) {
+        prePrepareCount[body.seq] = {sender: body.sent_by, message: clientSignedMessage.message};
+      } 
+      //else {
+      //  if (!prePrepareCount[body.seq].includes({sender: body.sent_by, message: clientSignedMessage.message})) {
+      //    prePrepareCount[body.seq].push({sender: body.sent_by, message: clientSignedMessage.message});
+      //  }
+      //}
+      console.log(
+        `Pre-Prepare count for seq ${body.seq}: ${prePrepareCount[body.seq].length}`
+      );
 
-    broadcast({
-      body: newBody,
-      signature,
-      clientSignedMessage,
-    });
+      const newBody = {
+        type: "prepare",
+        view,
+        seq: body.seq,
+        hash: body.hash,
+        sent_by: `http://${process.env.HOSTNAME}:3000`,
+      };
+      const { signature } = signMessage(newBody);
+
+      broadcast({
+        body: newBody,
+        signature,
+        clientSignedMessage,
+      });
+    } else{
+      console.log("Sequence number not found in Request phase");
+      if (!faultyNodes.has(body.sent_by)) {
+        faultyNodes.add(body.sent_by);
+        console.error(`Node ${body.sent_by} suspected faulty`);
+        if (body.sent_by === primary) {
+          switchView();
+          if (isPrimary()){
+            // handleRequest_afterFaulty(clientSignedMessage)
+          }
+        }
+      }
+    }
   } else {
     console.warn(
       `PrePrepare message not from primary. Ignored. Expected from: ${primary}, but got from: ${body.sent_by}`
@@ -303,20 +410,49 @@ function handlePrePrepare(body, clientSignedMessage) {
 
 let broadcastedCommits = {}; // Track broadcasted commit messages
 
+function checkPrepareCount(prepareCountList,seq){
+    // Estrai il messaggio di riferimento da prePrepareCount[body.seq]
+    if (prePrepareCount[seq]){
+      const referenceMessage = prePrepareCount[seq].message;
+
+      // Conta le occorrenze dei messaggi nella lista prepareCountList
+      let messageCount = 0;
+      const referenceMessageString = JSON.stringify(referenceMessage);
+
+      for (let i = 0; i < prepareCountList.length; i++) {
+          // Converti il messaggio corrente in una stringa JSON
+        const currentMessageString = JSON.stringify(prepareCountList[i].message);
+        
+        if (currentMessageString === referenceMessageString) {
+          messageCount++;
+        }
+      }
+
+      return messageCount >= Math.floor(2 * (nodes.length - 1) / 3);
+    }else{
+      console.log("Sequence number not found before in Prepare");
+    }
+}
+
 function handlePrepare(body, clientSignedMessage) {
   console.log("Handling Prepare");
+
   if (prepareCount[body.seq] === undefined) {
-    prepareCount[body.seq] = [body.sent_by];
+    prepareCount[body.seq] = [{sender: body.sent_by, message: clientSignedMessage.message}];
   } else {
-    if (!prepareCount[body.seq].includes(body.sent_by)) {
-      prepareCount[body.seq].push(body.sent_by);
+    if (!prepareCount[body.seq].includes({sender: body.sent_by, message: clientSignedMessage.message})) {
+      prepareCount[body.seq].push({sender: body.sent_by, message: clientSignedMessage.message});
     }
   }
   console.log(
     `Prepare count for seq ${body.seq}: ${prepareCount[body.seq].length}`
   );
+  // prepareCount[body.seq].length >= requiredPrepareCount
 
-  if (prepareCount[body.seq].length >= requiredPrepareCount) {
+  // TODO: Add check timeout to see if the checkPrepareCount is not passed in fast time, probably there are too many faulty processes or primary is faulty
+  // Try to change primary and see if the PBFT works
+  // So we need a function that allows faulty actions by the primary, that will lead to not accepted messages (There is always the check of the signature of the client)
+  if (checkPrepareCount(prepareCount[body.seq],body.seq)) {
     // Ensure the commit message is only broadcasted once
     if (!broadcastedCommits[body.seq]) {
       broadcastedCommits[body.seq] = true; // Mark the commit message as broadcasted
@@ -351,8 +487,8 @@ async function handleCommit(body, clientSignedMessage) {
   );
 
   // Check if consensus is reached
-  // TODO: check that preparedCount is true
-
+  
+  // Check that preparedCount is true and if commitCount is true
   if (prepareCount[body.seq].length >= requiredPrepareCount) {
     if (
       commitCount[body.seq].length >=
@@ -454,15 +590,6 @@ async function handleCommit(body, clientSignedMessage) {
   }
 }
 
-// function handleReply(data, seq) {
-//     console.log("Handling Reply");
-//     replies[seq] = (replies[seq] || 0) + 1;
-//     console.log(`Reply count for seq ${seq}: ${replies[seq]}`);
-//     if (replies[seq] >= Math.floor((2 * (nodes.length - 1)) / 3)) {
-//         console.log('Return. Msg:', data);
-//     }
-// }
-
 function isPrimary() {
   return `http://${process.env.HOSTNAME}:3000` === primary;
 }
@@ -476,16 +603,16 @@ function checkNodesHealth() {
         .get(`${node}/health`)
         .then((response) => {
           // Node responded, reset suspicion
-          if (faultyNodes.has(node)) {
+          if (crashedNodes.has(node)) {
             console.log(`Node ${node} recovered`);
-            faultyNodes.delete(node);
+            crashedNodes.delete(node);
           }
         })
         .catch((error) => {
           // Node didn't respond, mark as faulty
-          if (!faultyNodes.has(node)) {
-            faultyNodes.add(node);
-            console.error(`Node ${node} suspected faulty`);
+          if (!crashedNodes.has(node)) {
+            crashedNodes.add(node);
+            console.error(`Node ${node} suspected crashed`);
             if (node === primary) {
               switchView();
             }
@@ -565,7 +692,7 @@ app.post("/message", (req, res) => {
       console.error("Invalid signature. Message not authenticated.");
       return res.status(400).send("Invalid signature");
     } else {
-      console.log("Tried public key for node:", body.sent_by, "and verified");
+      // console.log("Tried public key for node:", body.sent_by, "and verified");
 
       // Check hash of received message
       const computedHash = crypto
@@ -639,7 +766,7 @@ app.post("/receivePublicKey", (req, res) => {
   if (publicKey && nodeAddress) {
     // Validate publicKey if necessary
     publicKeys.set(nodeAddress, publicKey);
-    console.log(`Public key received and stored for node: ${nodeAddress}`);
+    // console.log(`Public key received and stored for node: ${nodeAddress}`);
     res.status(200).send("Public key stored successfully.");
   } else {
     res

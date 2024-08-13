@@ -19,3 +19,6 @@ docker exec -it node1 bash
 sqlite3 data/data.db 
 
 SELECT * FROM state;
+
+
+docker-compose down
