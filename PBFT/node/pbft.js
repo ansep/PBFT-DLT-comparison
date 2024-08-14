@@ -18,10 +18,8 @@ const nodes = [
 
 // To have first primary as faulty, put at false if you want normal behaviour
 let faulty_example = false;
-if (`http://${process.env.HOSTNAME}:3000` == "http://node1:3000"){
-  faulty_example = true
-} else{
-  faulty_example = false
+if (`http://${process.env.HOSTNAME}:3000` == "http://node1:3000") {
+  faulty_example = true;
 }
 
 let currentState = {};
@@ -136,7 +134,7 @@ function switchView() {
 }
 
 function sendFaultyMessage(clientSignedMessage) {
-  faulty_example = false
+  faulty_example = false;
   const { message, signature } = clientSignedMessage;
   const { type, data, seq, client } = message;
   const hash = crypto
@@ -162,14 +160,13 @@ function sendFaultyMessage(clientSignedMessage) {
 function broadcastToNode(node, message) {
   console.log(`Broadcasting message: ${JSON.stringify(message)}`);
   if (
-      // Considering broadcast also to self
-      // node !== `http://${process.env.HOSTNAME}:3000` &&
-      !crashedNodes.has(node)
-    ) {
-      axios.post(`${node}/message`, message).catch(console.error);
-    };
+    // Considering broadcast also to self
+    // node !== `http://${process.env.HOSTNAME}:3000` &&
+    !crashedNodes.has(node)
+  ) {
+    axios.post(`${node}/message`, message).catch(console.error);
+  }
 }
-
 
 async function handleRequest(clientSignedMessage, socket) {
   const { message, signature } = clientSignedMessage;
@@ -178,6 +175,21 @@ async function handleRequest(clientSignedMessage, socket) {
   console.log(
     `TCP Message received: ${type}, Data: ${JSON.stringify(data)}, Seq: ${seq}`
   );
+
+  try {
+    db.query("INSERT INTO consensus VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
+      type,
+      seq,
+      client,
+      JSON.stringify(data),
+      client,
+      false,
+      1,
+      Date.now(),
+    ]);
+  } catch (error) {
+    console.error("Error inserting into consensus table:", error.message);
+  }
 
   console.log("Handling Request");
   // Ensure consensusReached is initially set to false
@@ -189,10 +201,10 @@ async function handleRequest(clientSignedMessage, socket) {
     .update(JSON.stringify(message))
     .digest("hex");
   try {
-
     setTimeout(() => {
       if (!consensusReached[seq]) {
         console.log("Timeout reached. Consensus not achieved.");
+        //round[seq]++
         if (isPrimary()) {
           handleRequest_afterFaulty(clientSignedMessage);
         }
@@ -203,7 +215,7 @@ async function handleRequest(clientSignedMessage, socket) {
     if (data.type === undefined) {
       if (isPrimary()) {
         console.log("Node is primary, broadcasting PrePrepare");
-        if (faulty_example == false){
+        if (faulty_example == false) {
           const body = {
             type: "pre-prepare",
             client,
@@ -295,7 +307,7 @@ function handleRequest_afterFaulty(clientSignedMessage) {
   //  `TCP Message received: ${type}, Data: ${JSON.stringify(data)}, Seq: ${seq}`
   //);
 
-  console.log("Handling Request again after the view chnage");
+  console.log("Handling Request again after the view change");
   // Ensure consensusReached is initially set to false
   consensusReached[seq] = false;
   console.log(consensusReached[seq]);
@@ -306,9 +318,9 @@ function handleRequest_afterFaulty(clientSignedMessage) {
   try {
     // Check if the request is a transaction or a state request
     if (data.type === undefined) {
-      if (isPrimary()) {
+      if (isPrimary() && process.env.HOSTNAME != "node1") {
         console.log("Node is primary, broadcasting PrePrepare");
-        if (faulty_example == false){
+        if (faulty_example == false) {
           const body = {
             type: "pre-prepare",
             client,
@@ -361,17 +373,21 @@ function handlePrePrepare(body, clientSignedMessage) {
       "PrePrepare message is from the primary. Broadcasting prepare."
     );
     if (body.seq in consensusReached) {
-
       if (prePrepareCount[body.seq] === undefined) {
-        prePrepareCount[body.seq] = {sender: body.sent_by, message: clientSignedMessage.message};
-      } 
+        prePrepareCount[body.seq] = {
+          sender: body.sent_by,
+          message: clientSignedMessage.message,
+        };
+      }
       //else {
       //  if (!prePrepareCount[body.seq].includes({sender: body.sent_by, message: clientSignedMessage.message})) {
       //    prePrepareCount[body.seq].push({sender: body.sent_by, message: clientSignedMessage.message});
       //  }
       //}
       console.log(
-        `Pre-Prepare count for seq ${body.seq}: ${prePrepareCount[body.seq].length}`
+        `Pre-Prepare count for seq ${body.seq}: ${
+          prePrepareCount[body.seq].length
+        }`
       );
 
       const newBody = {
@@ -388,14 +404,14 @@ function handlePrePrepare(body, clientSignedMessage) {
         signature,
         clientSignedMessage,
       });
-    } else{
+    } else {
       console.log("Sequence number not found in Request phase");
       if (!faultyNodes.has(body.sent_by)) {
         faultyNodes.add(body.sent_by);
         console.error(`Node ${body.sent_by} suspected faulty`);
         if (body.sent_by === primary) {
           switchView();
-          if (isPrimary()){
+          if (isPrimary()) {
             // handleRequest_afterFaulty(clientSignedMessage)
           }
         }
@@ -410,38 +426,48 @@ function handlePrePrepare(body, clientSignedMessage) {
 
 let broadcastedCommits = {}; // Track broadcasted commit messages
 
-function checkPrepareCount(prepareCountList,seq){
-    // Estrai il messaggio di riferimento da prePrepareCount[body.seq]
-    if (prePrepareCount[seq]){
-      const referenceMessage = prePrepareCount[seq].message;
+function checkPrepareCount(prepareCountList, seq) {
+  // Estrai il messaggio di riferimento da prePrepareCount[body.seq]
+  if (prePrepareCount[seq]) {
+    const referenceMessage = prePrepareCount[seq].message;
 
-      // Conta le occorrenze dei messaggi nella lista prepareCountList
-      let messageCount = 0;
-      const referenceMessageString = JSON.stringify(referenceMessage);
+    // Conta le occorrenze dei messaggi nella lista prepareCountList
+    let messageCount = 0;
+    const referenceMessageString = JSON.stringify(referenceMessage);
 
-      for (let i = 0; i < prepareCountList.length; i++) {
-          // Converti il messaggio corrente in una stringa JSON
-        const currentMessageString = JSON.stringify(prepareCountList[i].message);
-        
-        if (currentMessageString === referenceMessageString) {
-          messageCount++;
-        }
+    for (let i = 0; i < prepareCountList.length; i++) {
+      // Converti il messaggio corrente in una stringa JSON
+      const currentMessageString = JSON.stringify(prepareCountList[i].message);
+
+      if (currentMessageString === referenceMessageString) {
+        messageCount++;
       }
-
-      return messageCount >= Math.floor(2 * (nodes.length - 1) / 3);
-    }else{
-      console.log("Sequence number not found before in Prepare");
     }
+
+    return messageCount >= Math.floor((2 * (nodes.length - 1)) / 3);
+  } else {
+    console.log("Sequence number not found before in Prepare");
+  }
 }
 
 function handlePrepare(body, clientSignedMessage) {
   console.log("Handling Prepare");
 
   if (prepareCount[body.seq] === undefined) {
-    prepareCount[body.seq] = [{sender: body.sent_by, message: clientSignedMessage.message}];
+    prepareCount[body.seq] = [
+      { sender: body.sent_by, message: clientSignedMessage.message },
+    ];
   } else {
-    if (!prepareCount[body.seq].includes({sender: body.sent_by, message: clientSignedMessage.message})) {
-      prepareCount[body.seq].push({sender: body.sent_by, message: clientSignedMessage.message});
+    if (
+      !prepareCount[body.seq].includes({
+        sender: body.sent_by,
+        message: clientSignedMessage.message,
+      })
+    ) {
+      prepareCount[body.seq].push({
+        sender: body.sent_by,
+        message: clientSignedMessage.message,
+      });
     }
   }
   console.log(
@@ -452,7 +478,7 @@ function handlePrepare(body, clientSignedMessage) {
   // TODO: Add check timeout to see if the checkPrepareCount is not passed in fast time, probably there are too many faulty processes or primary is faulty
   // Try to change primary and see if the PBFT works
   // So we need a function that allows faulty actions by the primary, that will lead to not accepted messages (There is always the check of the signature of the client)
-  if (checkPrepareCount(prepareCount[body.seq],body.seq)) {
+  if (checkPrepareCount(prepareCount[body.seq], body.seq)) {
     // Ensure the commit message is only broadcasted once
     if (!broadcastedCommits[body.seq]) {
       broadcastedCommits[body.seq] = true; // Mark the commit message as broadcasted
@@ -487,7 +513,7 @@ async function handleCommit(body, clientSignedMessage) {
   );
 
   // Check if consensus is reached
-  
+
   // Check that preparedCount is true and if commitCount is true
   if (prepareCount[body.seq].length >= requiredPrepareCount) {
     if (
@@ -550,6 +576,28 @@ async function handleCommit(body, clientSignedMessage) {
                 transaction: { from, to, amount },
               };
               // TODO: sign message and get all public keys from client from nodes at startup
+
+              try {
+                await db.query(
+                  "INSERT INTO consensus VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                  [
+                    newBody.type,
+                    newBody.seq,
+                    clientSignedMessage.message.client,
+                    JSON.stringify(clientSignedMessage.message.data),
+                    newBody.sent_by,
+                    newBody.success,
+                    1,
+                    Date.now(),
+                  ]
+                );
+                db.exportDatabase("/app/data/data.db", "/app/data/data.csv");
+              } catch (error) {
+                console.error(
+                  "Error inserting into consensus table:",
+                  error.message
+                );
+              }
               socketClient[body.seq].write(
                 JSON.stringify({
                   body: newBody,
@@ -681,7 +729,7 @@ app.post("/transaction", async (req, res) => {
   }
 });
 
-app.post("/message", (req, res) => {
+app.post("/message", async (req, res) => {
   const { body, signature, clientSignedMessage } = req.body;
   const publicKey = publicKeys.get(body.sent_by);
   if (!publicKey) {
@@ -728,6 +776,26 @@ app.post("/message", (req, res) => {
             );
             return res.status(400).send("Invalid sequence number");
           } else {
+            try {
+              db.query(
+                "INSERT INTO consensus VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                [
+                  body.type,
+                  body.seq,
+                  clientSignedMessage.message.client,
+                  JSON.stringify(clientSignedMessage.message.data),
+                  body.sent_by,
+                  false,
+                  1,
+                  Date.now(),
+                ]
+              );
+            } catch (error) {
+              console.error(
+                "Error inserting into consensus table:",
+                error.message
+              );
+            }
             switch (body.type) {
               case "pre-prepare":
                 // TODO:
