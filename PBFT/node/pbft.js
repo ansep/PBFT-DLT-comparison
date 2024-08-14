@@ -9,16 +9,11 @@ const crypto = require("crypto");
 const fs = require("fs");
 app.use(bodyParser.json());
 
-const nodes = [
-  "http://node1:3000",
-  "http://node2:3000",
-  "http://node3:3000",
-  "http://node4:3000",
-];
+const nodes = ["node1", "node2", "node3", "node4"];
 
 // To have first primary as faulty, put at false if you want normal behaviour
 let faulty_example = false;
-if (`http://${process.env.HOSTNAME}:3000` == "http://node1:3000") {
+if (process.env.HOSTNAME == "node1") {
   faulty_example = true;
 }
 
@@ -67,9 +62,9 @@ function distributePublicKey() {
   nodes.forEach((node) => {
     // if (node !== `http://${process.env.HOSTNAME}:3000`) {
     axios
-      .post(`${node}/receivePublicKey`, {
+      .post(`http://${node}:3000/receivePublicKey`, {
         publicKey,
-        nodeAddress: `http://${process.env.HOSTNAME}:3000`,
+        nodeAddress: process.env.HOSTNAME,
       })
       .catch(console.error);
     // }
@@ -119,7 +114,7 @@ function broadcast(message) {
       // node !== `http://${process.env.HOSTNAME}:3000` &&
       !crashedNodes.has(node)
     ) {
-      axios.post(`${node}/message`, message).catch(console.error);
+      axios.post(`http://${node}:3000/message`, message).catch(console.error);
     }
   });
 }
@@ -149,7 +144,7 @@ function sendFaultyMessage(clientSignedMessage) {
       client,
       seq: modifiedSeq,
       hash,
-      sent_by: `http://${process.env.HOSTNAME}:3000`,
+      sent_by: process.env.HOSTNAME,
     };
     const { signature } = signMessage(body);
     broadcastToNode(node, { body, signature, clientSignedMessage });
@@ -164,7 +159,7 @@ function broadcastToNode(node, message) {
     // node !== `http://${process.env.HOSTNAME}:3000` &&
     !crashedNodes.has(node)
   ) {
-    axios.post(`${node}/message`, message).catch(console.error);
+    axios.post(`http://${node}:3000/message`, message).catch(console.error);
   }
 }
 
@@ -221,7 +216,7 @@ async function handleRequest(clientSignedMessage, socket) {
             client,
             seq,
             hash,
-            sent_by: `http://${process.env.HOSTNAME}:3000`,
+            sent_by: process.env.HOSTNAME,
           };
           const { signature } = signMessage(body);
 
@@ -326,7 +321,7 @@ function handleRequest_afterFaulty(clientSignedMessage) {
             client,
             seq,
             hash,
-            sent_by: `http://${process.env.HOSTNAME}:3000`,
+            sent_by: process.env.HOSTNAME,
           };
           const { signature } = signMessage(body);
 
@@ -395,7 +390,7 @@ function handlePrePrepare(body, clientSignedMessage) {
         view,
         seq: body.seq,
         hash: body.hash,
-        sent_by: `http://${process.env.HOSTNAME}:3000`,
+        sent_by: process.env.HOSTNAME,
       };
       const { signature } = signMessage(newBody);
 
@@ -488,7 +483,7 @@ function handlePrepare(body, clientSignedMessage) {
         view,
         seq: body.seq,
         hash: body.hash,
-        sent_by: `http://${process.env.HOSTNAME}:3000`,
+        sent_by: process.env.HOSTNAME,
       };
       const { signature } = signMessage(newBody);
       broadcast({ body: newBody, signature, clientSignedMessage });
@@ -571,7 +566,7 @@ async function handleCommit(body, clientSignedMessage) {
                 type: "Reply",
                 view,
                 seq: body.seq,
-                sent_by: `http://${process.env.HOSTNAME}:3000`,
+                sent_by: process.env.HOSTNAME,
                 success: true,
                 transaction: { from, to, amount },
               };
@@ -639,7 +634,7 @@ async function handleCommit(body, clientSignedMessage) {
 }
 
 function isPrimary() {
-  return `http://${process.env.HOSTNAME}:3000` === primary;
+  return process.env.HOSTNAME == primary;
 }
 
 function checkNodesHealth() {
@@ -648,7 +643,7 @@ function checkNodesHealth() {
     lastHealthCheck = now;
     nodes.forEach((node) => {
       axios
-        .get(`${node}/health`)
+        .get(`http://${node}:3000/health`)
         .then((response) => {
           // Node responded, reset suspicion
           if (crashedNodes.has(node)) {
@@ -694,7 +689,7 @@ app.post("/transaction", async (req, res) => {
     console.log("Node is primary, broadcasting PrePrepare");
     broadcast({
       type: "pre-prepare",
-      data: { ...data, sent_by: `http://${process.env.HOSTNAME}:3000` },
+      data: { ...data, sent_by: process.env.HOSTNAME },
       seq,
     });
 
