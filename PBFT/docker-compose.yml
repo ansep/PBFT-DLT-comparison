@@ -56,6 +56,19 @@ services:
     networks:
       - pbft_network
 
+  node5:
+    build: ./node
+    container_name: node5
+    hostname: node5
+    environment:
+      - HOSTNAME=node5
+    volumes:
+      - ./node/data/node5:/app/data 
+    ports:
+      - "3005:3000"
+      - "4005:4000"
+    networks:
+      - pbft_network
 
   client:
     build: ./client
@@ -68,6 +81,7 @@ services:
       - node2
       - node3
       - node4
+      - node5
     networks:
       - pbft_network
     ports:

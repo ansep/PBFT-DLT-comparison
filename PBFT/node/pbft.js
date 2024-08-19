@@ -9,11 +9,17 @@ const crypto = require("crypto");
 const fs = require("fs");
 app.use(bodyParser.json());
 
-const nodes = ["node1", "node2", "node3", "node4"];
+const nodes = ["node1", "node2", "node3", "node4", "node5"];
+
+let faultyNodes = new Set();
 
 // To have first primary as faulty, put at false if you want normal behaviour
 let faulty_example = false;
 if (process.env.HOSTNAME == "node1") {
+  faulty_example = true;
+  faultyNodes.add(process.env.HOSTNAME);
+}
+if (process.env.HOSTNAME == "node2") {
   faulty_example = true;
 }
 
@@ -27,7 +33,6 @@ let prepareCount = {};
 let commitCount = {};
 let replies = {};
 let consensusReached = {};
-let faultyNodes = new Set();
 let socketClient = {};
 
 const privateKeyPath = "./privateKey.pem";
@@ -196,15 +201,8 @@ async function handleRequest(clientSignedMessage, socket) {
     .update(JSON.stringify(message))
     .digest("hex");
   try {
-    setTimeout(() => {
-      if (!consensusReached[seq]) {
-        console.log("Timeout reached. Consensus not achieved.");
-        //round[seq]++
-        if (isPrimary()) {
-          handleRequest_afterFaulty(clientSignedMessage);
-        }
-      }
-    }, 10000);
+    // Call the function initially to start the timer
+    startConsensusTimer(seq, clientSignedMessage);
 
     // Check if the request is a transaction or a state request
     if (data.type === undefined) {
@@ -292,6 +290,20 @@ async function getBalance(account) {
     console.error("Error fetching balance:", error.message);
     return 0;
   }
+}
+
+function startConsensusTimer(seq, clientSignedMessage) {
+  setTimeout(() => {
+    if (!consensusReached[seq]) {
+      console.log("Timeout reached. Consensus not achieved.");
+      if (isPrimary()) {
+        handleRequest_afterFaulty(clientSignedMessage);
+      } else {
+        console.log("Not primary, restarting timer...");
+        startConsensusTimer(seq, clientSignedMessage); // Restart the timer
+      }
+    }
+  }, 10000);
 }
 
 function handleRequest_afterFaulty(clientSignedMessage) {
@@ -394,11 +406,13 @@ function handlePrePrepare(body, clientSignedMessage) {
       };
       const { signature } = signMessage(newBody);
 
-      broadcast({
-        body: newBody,
-        signature,
-        clientSignedMessage,
-      });
+      if (!crashedNodes.has(process.env.HOSTNAME) && !faultyNodes.has(process.env.HOSTNAME)) {
+        broadcast({
+          body: newBody,
+          signature,
+          clientSignedMessage,
+        });
+      }      
     } else {
       console.log("Sequence number not found in Request phase");
       if (!faultyNodes.has(body.sent_by)) {
@@ -486,7 +500,13 @@ function handlePrepare(body, clientSignedMessage) {
         sent_by: process.env.HOSTNAME,
       };
       const { signature } = signMessage(newBody);
-      broadcast({ body: newBody, signature, clientSignedMessage });
+      if (!crashedNodes.has(process.env.HOSTNAME) && !faultyNodes.has(process.env.HOSTNAME)) {
+        broadcast({
+          body: newBody,
+          signature,
+          clientSignedMessage,
+        });
+      } 
     } else {
       console.log(`Commit message for seq ${body.seq} already broadcasted.`);
     }
@@ -494,144 +514,141 @@ function handlePrepare(body, clientSignedMessage) {
 }
 
 async function handleCommit(body, clientSignedMessage) {
-  console.log("Handling Commit");
-  // Initialize commit count for this sequence number if it doesn't exist
-  if (commitCount[body.seq] === undefined) {
-    commitCount[body.seq] = [body.sent_by];
-  } else {
-    if (!commitCount[body.seq].includes(body.sent_by)) {
-      commitCount[body.seq].push(body.sent_by);
+  if (!crashedNodes.has(process.env.HOSTNAME) && !faultyNodes.has(process.env.HOSTNAME)) {
+    console.log("Handling Commit");
+    // Initialize commit count for this sequence number if it doesn't exist
+    if (commitCount[body.seq] === undefined) {
+      commitCount[body.seq] = [body.sent_by];
+    } else {
+      if (!commitCount[body.seq].includes(body.sent_by)) {
+        commitCount[body.seq].push(body.sent_by);
+      }
     }
-  }
-  console.log(
-    `Commit count for seq ${body.seq}: ${commitCount[body.seq].length}`
-  );
+    console.log(
+      `Commit count for seq ${body.seq}: ${commitCount[body.seq].length}`
+    );
 
-  // Check if consensus is reached
+    // Check if consensus is reached
+    // Check that preparedCount is true and if commitCount is true
+    if (prepareCount[body.seq].length >= requiredPrepareCount) {
+      if (
+        commitCount[body.seq].length >=
+        Math.floor((2 * (nodes.length - 1)) / 3 + 1)
+      ) {
+        if (!consensusReached[body.seq]) {
+          consensusReached[body.seq] = true;
+          console.log(consensusReached[body.seq]);
 
-  // Check that preparedCount is true and if commitCount is true
-  if (prepareCount[body.seq].length >= requiredPrepareCount) {
-    if (
-      commitCount[body.seq].length >=
-      Math.floor((2 * (nodes.length - 1)) / 3 + 1)
-    ) {
-      if (!consensusReached[body.seq]) {
-        consensusReached[body.seq] = true;
-        console.log(consensusReached[body.seq]);
+          // Handle Reply
+          const { from, to, amount } = clientSignedMessage.message.data; // Ensure `from`, `to`, and `amount` are correctly accessed from `data`
 
-        //Handle Reply
-        const { from, to, amount } = clientSignedMessage.message.data; // Ensure `from`, `to`, and `amount` are correctly accessed from `data`
+          const fromExists = await accountExists(from);
+          const toExists = await accountExists(to);
 
-        const fromExists = await accountExists(from);
-        const toExists = await accountExists(to);
-
-        if (!fromExists || !toExists) {
-          const errorMessage = {
-            body: {
-              type: "Reply",
-              success: false,
-              error: `One or more accounts do not exist`,
-            },
-          };
-          console.error(`One or more accounts do not exist`);
-          socketClient[body.seq].write(JSON.stringify(errorMessage));
-          return;
-        }
-
-        //TODO: check sequential order of requests from clients
-
-        // Check balance before proceeding
-        const fromBalance = await getBalance(from);
-
-        if (fromBalance >= amount) {
-          try {
-            console.log(`Updating database: ${amount} from ${from} to ${to}`);
-            db.query(
-              "UPDATE state SET balance = balance - ? WHERE username = ?",
-              [amount, from]
-            );
-            db.query(
-              "UPDATE state SET balance = balance + ? WHERE username = ?",
-              [amount, to]
-            );
-
-            // Send confirmation to the original requester (if socket is provided)
-            if (socketClient[body.seq]) {
-              // const message = {
-              //   type: "Reply",
-              //   success: true,
-              //   transaction: { from, to, amount },
-              // };
-              const newBody = {
-                type: "Reply",
-                view,
-                seq: body.seq,
-                sent_by: process.env.HOSTNAME,
-                success: true,
-                transaction: { from, to, amount },
-              };
-              // TODO: sign message and get all public keys from client from nodes at startup
-
-              try {
-                await db.query(
-                  "INSERT INTO consensus VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-                  [
-                    newBody.type,
-                    newBody.seq,
-                    clientSignedMessage.message.client,
-                    JSON.stringify(clientSignedMessage.message.data),
-                    newBody.sent_by,
-                    newBody.success,
-                    1,
-                    Date.now(),
-                  ]
-                );
-                db.exportDatabase("/app/data/data.db", "/app/data/data.csv");
-              } catch (error) {
-                console.error(
-                  "Error inserting into consensus table:",
-                  error.message
-                );
-              }
-              socketClient[body.seq].write(
-                JSON.stringify({
-                  body: newBody,
-                  signature: signMessage(newBody),
-                })
-              );
-            }
-          } catch (error) {
-            console.error("Error updating balances:", error.message);
+          if (!fromExists || !toExists) {
             const errorMessage = {
               body: {
                 type: "Reply",
                 success: false,
-                error: error.message,
+                error: `One or more accounts do not exist`,
               },
             };
+            console.error(`One or more accounts do not exist`);
             socketClient[body.seq].write(JSON.stringify(errorMessage));
+            return;
           }
-        } else {
-          console.error(
-            `Insufficient balance for transaction: ${JSON.stringify(
-              clientSignedMessage.message.data
-            )}`
-          );
-          const errorMessage = {
-            body: {
-              type: "Reply",
-              success: false,
-              error: `Insufficient balance for transaction: ${JSON.stringify(
+
+          // TODO: check sequential order of requests from clients
+
+          // Check balance before proceeding
+          const fromBalance = await getBalance(from);
+
+          if (fromBalance >= amount) {
+            try {
+              console.log(`Updating database: ${amount} from ${from} to ${to}`);
+              db.query(
+                "UPDATE state SET balance = balance - ? WHERE username = ?",
+                [amount, from]
+              );
+              db.query(
+                "UPDATE state SET balance = balance + ? WHERE username = ?",
+                [amount, to]
+              );
+
+              // Send confirmation to the original requester (if socket is provided)
+              if (socketClient[body.seq]) {
+                const newBody = {
+                  type: "Reply",
+                  view,
+                  seq: body.seq,
+                  sent_by: process.env.HOSTNAME,
+                  success: true,
+                  transaction: { from, to, amount },
+                };
+                // TODO: sign message and get all public keys from client from nodes at startup
+
+                try {
+                  await db.query(
+                    "INSERT INTO consensus VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+                    [
+                      newBody.type,
+                      newBody.seq,
+                      clientSignedMessage.message.client,
+                      JSON.stringify(clientSignedMessage.message.data),
+                      newBody.sent_by,
+                      newBody.success,
+                      1,
+                      Date.now(),
+                    ]
+                  );
+                  db.exportDatabase("/app/data/data.db", "/app/data/data.csv");
+                } catch (error) {
+                  console.error(
+                    "Error inserting into consensus table:",
+                    error.message
+                  );
+                }
+                socketClient[body.seq].write(
+                  JSON.stringify({
+                    body: newBody,
+                    signature: signMessage(newBody),
+                  })
+                );
+              }
+            } catch (error) {
+              console.error("Error updating balances:", error.message);
+              const errorMessage = {
+                body: {
+                  type: "Reply",
+                  success: false,
+                  error: error.message,
+                },
+              };
+              socketClient[body.seq].write(JSON.stringify(errorMessage));
+            }
+          } else {
+            console.error(
+              `Insufficient balance for transaction: ${JSON.stringify(
                 clientSignedMessage.message.data
-              )}`,
-            },
-          };
-          socketClient[seq].write(JSON.stringify(errorMessage));
+              )}`
+            );
+            const errorMessage = {
+              body: {
+                type: "Reply",
+                success: false,
+                error: `Insufficient balance for transaction: ${JSON.stringify(
+                  clientSignedMessage.message.data
+                )}`,
+              },
+            };
+            socketClient[seq].write(JSON.stringify(errorMessage));
+          }
         }
       }
     }
   }
 }
+
 
 function isPrimary() {
   return process.env.HOSTNAME == primary;
