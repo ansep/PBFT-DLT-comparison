@@ -10,6 +10,7 @@ const nodes = [
   { hostname: "node2", port: 4000 }, // Adjust ports as needed
   { hostname: "node3", port: 4000 },
   { hostname: "node4", port: 4000 },
+  { hostname: "node5", port: 4000 },
 ];
 
 let consensusState = {};
@@ -47,7 +48,7 @@ async function sendMessage(node, message) {
         if (
           !consensusReached[message.message.seq] &&
           consensusState[message.message.seq].length >=
-            Math.floor((2 * nodes.length) / 3) + 1 &&
+            Math.floor((nodes.length - 1) / 3) + 1 &&
           consensusState[message.message.seq].every(
             (value) =>
               JSON.stringify(value) === JSON.stringify(response.transaction)
@@ -80,7 +81,7 @@ async function sendMessage(node, message) {
 }
 
 // Function to handle user input from CLI
-function startCli() {
+async function startCli() {
   const rl = readline.createInterface({
     input: process.stdin,
     output: process.stdout,
@@ -89,7 +90,7 @@ function startCli() {
   rl.setPrompt("> ");
   rl.prompt();
 
-  rl.on("line", (input) => {
+  rl.on("line", async (input) => {
     const [command, ...args] = input.trim().split(" ");
 
     if (command === "send" && args[0] === "transaction") {
@@ -98,7 +99,6 @@ function startCli() {
 
       if (from && to && !isNaN(amount)) {
         const responses = [];
-        // Check if the transaction is valid (simplified check)
         const transactionData = { from, to, amount };
         const seqNumber = Date.now(); // Use timestamp as sequence number (for simplicity)
 
@@ -112,30 +112,48 @@ function startCli() {
         };
         // Signature to ensure authentication and integrity
         const signedMessage = signMessage(message);
+
         // Send the transaction request to all nodes
         nodes.forEach((node) => {
           responses.push(sendMessage(node, signedMessage));
         });
-        try {
-          console.log("Transaction sent. Waiting for consensus...");
 
-          Promise.race([
-            Promise.all(responses).then((values) => {
-              const end = new Date().getTime();
-              console.log(
-                `Transaction processed in ${end - seqNumber}ms. Response:`
-              );
-              // values.forEach((value) => {
-              //   console.log(`- ${value.node}: ${value.data}`);
-              // });
-            }),
-            new Promise((resolve, reject) => {
-              // Timeout after 10 seconds after which the transaction is considered failed
-              setTimeout(() => reject("Timeout"), 20000);
-            }),
-          ]);
+        console.log("Transaction sent. Waiting for consensus...");
+
+        // Create a promise to check consensus
+        const consensusPromise = new Promise((resolve) => {
+          const checkConsensus = setInterval(() => {
+            if (consensusReached[seqNumber]) {
+              clearInterval(checkConsensus);
+              resolve();
+            }
+          }, 1000); // Check every second
+        });
+
+        // Timeout promise
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => {
+            if (!consensusReached[seqNumber]) {
+              reject("Timeout");
+            }
+          }, 60000) // 60 seconds timeout
+        );
+
+        try {
+          await Promise.race([consensusPromise, timeoutPromise]);
+
+          if (consensusReached[seqNumber]) {
+            const end = new Date().getTime();
+            console.log(
+              `Transaction processed in ${end - seqNumber}ms. Response:`
+            );
+            // Optionally, you can log all the responses if needed
+            // responses.forEach((response) => {
+            //   console.log(`- ${response.node}: ${response.data}`);
+            // });
+          }
         } catch (err) {
-          console.error(`Transaction failed or timed out!`);
+          console.error(`Transaction failed or timed out! Error: ${err}`);
         }
       } else {
         console.error(
