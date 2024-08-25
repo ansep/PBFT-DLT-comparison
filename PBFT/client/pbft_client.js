@@ -4,14 +4,16 @@ const readline = require("readline");
 const crypto = require("crypto");
 const fs = require("fs");
 
-// List of nodes (servers) to connect to
-const nodes = [
-  { hostname: "node1", port: 4000 }, // Update to match your node setup
-  { hostname: "node2", port: 4000 }, // Adjust ports as needed
-  { hostname: "node3", port: 4000 },
-  { hostname: "node4", port: 4000 },
-  { hostname: "node5", port: 4000 },
-];
+// Get the node count from environment variables
+const nodeCount = parseInt(process.env.NODE_COUNT, 10);
+
+// Generate the list of nodes dynamically
+const nodes = [];
+for (let i = 1; i <= nodeCount; i++) {
+  nodes.push({ hostname: `node${i}`, port: 4000 });
+}
+// Log the nodes array for debugging purposes
+console.log(nodes);
 
 let consensusState = {};
 let consensusReached = {};
@@ -127,7 +129,7 @@ async function startCli() {
               clearInterval(checkConsensus);
               resolve();
             }
-          }, 1000); // Check every second
+          }, 50); // Check every second
         });
 
         // Timeout promise

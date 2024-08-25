@@ -9,19 +9,28 @@ const crypto = require("crypto");
 const fs = require("fs");
 app.use(bodyParser.json());
 
-const nodes = ["node1", "node2", "node3", "node4", "node5"];
+const nodeCount = parseInt(process.env.NODE_COUNT, 10);
+
+// Create the nodes array dynamically based on nodeCount
+const nodes = [];
+for (let i = 1; i <= nodeCount; i++) {
+  nodes.push(`node${i}`);
+}
+
+// Log the nodes array to check if it's correctly populated
+console.log("Nodes array:", nodes);
 
 let faultyNodes = new Set();
 
 // To have first primary as faulty, put at false if you want normal behaviour
 let faulty_example = false;
-if (process.env.HOSTNAME == "node1") {
-  faulty_example = true;
-  faultyNodes.add(process.env.HOSTNAME);
-}
-if (process.env.HOSTNAME == "node2") {
-  faulty_example = true;
-}
+//if (process.env.HOSTNAME == "node1") {
+//  faulty_example = true;
+//  faultyNodes.add(process.env.HOSTNAME);
+//}
+//if (process.env.HOSTNAME == "node2") {
+//  faulty_example = true;
+//}
 
 let currentState = {};
 let log = [];

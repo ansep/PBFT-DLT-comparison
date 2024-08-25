@@ -6,6 +6,7 @@ services:
     hostname: node1
     environment:
       - HOSTNAME=node1
+      - NODE_COUNT=5
     volumes:
       - ./node/data/node1:/app/data 
     ports:
@@ -13,27 +14,27 @@ services:
       - "4001:4000"
     networks:
       - pbft_network
-
   node2:
     build: ./node
     container_name: node2
     hostname: node2
     environment:
       - HOSTNAME=node2
+      - NODE_COUNT=5
     volumes:
-      - ./node/data/node2:/app/data  
+      - ./node/data/node2:/app/data 
     ports:
       - "3002:3000"
       - "4002:4000"
     networks:
       - pbft_network
-
   node3:
     build: ./node
     container_name: node3
     hostname: node3
     environment:
       - HOSTNAME=node3
+      - NODE_COUNT=5
     volumes:
       - ./node/data/node3:/app/data 
     ports:
@@ -41,13 +42,13 @@ services:
       - "4003:4000"
     networks:
       - pbft_network
-
   node4:
     build: ./node
     container_name: node4
     hostname: node4
     environment:
       - HOSTNAME=node4
+      - NODE_COUNT=5
     volumes:
       - ./node/data/node4:/app/data 
     ports:
@@ -55,13 +56,13 @@ services:
       - "4004:4000"
     networks:
       - pbft_network
-
   node5:
     build: ./node
     container_name: node5
     hostname: node5
     environment:
       - HOSTNAME=node5
+      - NODE_COUNT=5
     volumes:
       - ./node/data/node5:/app/data 
     ports:
@@ -76,6 +77,7 @@ services:
     hostname: pbft-client
     environment:
       - HOSTNAME=pbft-client
+      - NODE_COUNT=5
     depends_on:
       - node1
       - node2
@@ -88,7 +90,6 @@ services:
       - "4000:4000"
     stdin_open: true
     tty: true
-
 
 networks:
   pbft_network:
