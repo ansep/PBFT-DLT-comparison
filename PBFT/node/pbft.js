@@ -17,9 +17,6 @@ for (let i = 1; i <= nodeCount; i++) {
   nodes.push(`node${i}`);
 }
 
-// Log the nodes array to check if it's correctly populated
-console.log("Nodes array:", nodes);
-
 let faultyNodes = new Set();
 
 // To have first primary as faulty, put at false if you want normal behaviour
@@ -90,7 +87,7 @@ function initializeNode() {
     // console.log("Generating new keys for the node...");
     generateKeys();
   }
-  setTimeout(distributePublicKey, 1000);
+  setTimeout(distributePublicKey, 15000);
 }
 
 initializeNode();
