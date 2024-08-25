@@ -138,7 +138,7 @@ async function startCli() {
             if (!consensusReached[seqNumber]) {
               reject("Timeout");
             }
-          }, 60000) // 60 seconds timeout
+          }, 100000) // 60 seconds timeout
         );
 
         try {

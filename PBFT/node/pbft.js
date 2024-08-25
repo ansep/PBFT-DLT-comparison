@@ -21,11 +21,24 @@ let faultyNodes = new Set();
 
 // To have first primary as faulty, put at false if you want normal behaviour
 let faulty_example = false;
+
+// Code to create faulty process
 //if (process.env.HOSTNAME == "node1") {
 //  faulty_example = true;
-//  faultyNodes.add(process.env.HOSTNAME);
 //}
 //if (process.env.HOSTNAME == "node2") {
+//  faulty_example = true;
+//}
+//if (process.env.HOSTNAME == "node3") {
+//  faulty_example = true;
+//}
+//if (process.env.HOSTNAME == "node4") {
+//  faulty_example = true;
+//}
+//if (process.env.HOSTNAME == "node5") {
+//  faulty_example = true;
+//}
+//if (process.env.HOSTNAME == "node6") {
 //  faulty_example = true;
 //}
 
@@ -87,7 +100,7 @@ function initializeNode() {
     // console.log("Generating new keys for the node...");
     generateKeys();
   }
-  setTimeout(distributePublicKey, 15000);
+  setTimeout(distributePublicKey, 30000);
 }
 
 initializeNode();

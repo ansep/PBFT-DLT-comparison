@@ -6,7 +6,7 @@ services:
     hostname: node1
     environment:
       - HOSTNAME=node1
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node1:/app/data 
     ports:
@@ -20,7 +20,7 @@ services:
     hostname: node2
     environment:
       - HOSTNAME=node2
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node2:/app/data 
     ports:
@@ -34,7 +34,7 @@ services:
     hostname: node3
     environment:
       - HOSTNAME=node3
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node3:/app/data 
     ports:
@@ -48,7 +48,7 @@ services:
     hostname: node4
     environment:
       - HOSTNAME=node4
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node4:/app/data 
     ports:
@@ -62,7 +62,7 @@ services:
     hostname: node5
     environment:
       - HOSTNAME=node5
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node5:/app/data 
     ports:
@@ -76,7 +76,7 @@ services:
     hostname: node6
     environment:
       - HOSTNAME=node6
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node6:/app/data 
     ports:
@@ -90,7 +90,7 @@ services:
     hostname: node7
     environment:
       - HOSTNAME=node7
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node7:/app/data 
     ports:
@@ -104,7 +104,7 @@ services:
     hostname: node8
     environment:
       - HOSTNAME=node8
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node8:/app/data 
     ports:
@@ -118,7 +118,7 @@ services:
     hostname: node9
     environment:
       - HOSTNAME=node9
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node9:/app/data 
     ports:
@@ -132,7 +132,7 @@ services:
     hostname: node10
     environment:
       - HOSTNAME=node10
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node10:/app/data 
     ports:
@@ -146,7 +146,7 @@ services:
     hostname: node11
     environment:
       - HOSTNAME=node11
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node11:/app/data 
     ports:
@@ -160,7 +160,7 @@ services:
     hostname: node12
     environment:
       - HOSTNAME=node12
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node12:/app/data 
     ports:
@@ -174,7 +174,7 @@ services:
     hostname: node13
     environment:
       - HOSTNAME=node13
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node13:/app/data 
     ports:
@@ -188,7 +188,7 @@ services:
     hostname: node14
     environment:
       - HOSTNAME=node14
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node14:/app/data 
     ports:
@@ -202,7 +202,7 @@ services:
     hostname: node15
     environment:
       - HOSTNAME=node15
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node15:/app/data 
     ports:
@@ -216,7 +216,7 @@ services:
     hostname: node16
     environment:
       - HOSTNAME=node16
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node16:/app/data 
     ports:
@@ -230,7 +230,7 @@ services:
     hostname: node17
     environment:
       - HOSTNAME=node17
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node17:/app/data 
     ports:
@@ -244,7 +244,7 @@ services:
     hostname: node18
     environment:
       - HOSTNAME=node18
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node18:/app/data 
     ports:
@@ -258,12 +258,222 @@ services:
     hostname: node19
     environment:
       - HOSTNAME=node19
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     volumes:
       - ./node/data/node19:/app/data 
     ports:
       - "3019:3000"
       - "4019:4000"
+    networks:
+      - pbft_network
+  node20:
+    build: ./node
+    container_name: node20
+    hostname: node20
+    environment:
+      - HOSTNAME=node20
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node20:/app/data 
+    ports:
+      - "3020:3000"
+      - "4020:4000"
+    networks:
+      - pbft_network
+  node21:
+    build: ./node
+    container_name: node21
+    hostname: node21
+    environment:
+      - HOSTNAME=node21
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node21:/app/data 
+    ports:
+      - "3021:3000"
+      - "4021:4000"
+    networks:
+      - pbft_network
+  node22:
+    build: ./node
+    container_name: node22
+    hostname: node22
+    environment:
+      - HOSTNAME=node22
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node22:/app/data 
+    ports:
+      - "3022:3000"
+      - "4022:4000"
+    networks:
+      - pbft_network
+  node23:
+    build: ./node
+    container_name: node23
+    hostname: node23
+    environment:
+      - HOSTNAME=node23
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node23:/app/data 
+    ports:
+      - "3023:3000"
+      - "4023:4000"
+    networks:
+      - pbft_network
+  node24:
+    build: ./node
+    container_name: node24
+    hostname: node24
+    environment:
+      - HOSTNAME=node24
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node24:/app/data 
+    ports:
+      - "3024:3000"
+      - "4024:4000"
+    networks:
+      - pbft_network
+  node25:
+    build: ./node
+    container_name: node25
+    hostname: node25
+    environment:
+      - HOSTNAME=node25
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node25:/app/data 
+    ports:
+      - "3025:3000"
+      - "4025:4000"
+    networks:
+      - pbft_network
+  node26:
+    build: ./node
+    container_name: node26
+    hostname: node26
+    environment:
+      - HOSTNAME=node26
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node26:/app/data 
+    ports:
+      - "3026:3000"
+      - "4026:4000"
+    networks:
+      - pbft_network
+  node27:
+    build: ./node
+    container_name: node27
+    hostname: node27
+    environment:
+      - HOSTNAME=node27
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node27:/app/data 
+    ports:
+      - "3027:3000"
+      - "4027:4000"
+    networks:
+      - pbft_network
+  node28:
+    build: ./node
+    container_name: node28
+    hostname: node28
+    environment:
+      - HOSTNAME=node28
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node28:/app/data 
+    ports:
+      - "3028:3000"
+      - "4028:4000"
+    networks:
+      - pbft_network
+  node29:
+    build: ./node
+    container_name: node29
+    hostname: node29
+    environment:
+      - HOSTNAME=node29
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node29:/app/data 
+    ports:
+      - "3029:3000"
+      - "4029:4000"
+    networks:
+      - pbft_network
+  node30:
+    build: ./node
+    container_name: node30
+    hostname: node30
+    environment:
+      - HOSTNAME=node30
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node30:/app/data 
+    ports:
+      - "3030:3000"
+      - "4030:4000"
+    networks:
+      - pbft_network
+  node31:
+    build: ./node
+    container_name: node31
+    hostname: node31
+    environment:
+      - HOSTNAME=node31
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node31:/app/data 
+    ports:
+      - "3031:3000"
+      - "4031:4000"
+    networks:
+      - pbft_network
+  node32:
+    build: ./node
+    container_name: node32
+    hostname: node32
+    environment:
+      - HOSTNAME=node32
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node32:/app/data 
+    ports:
+      - "3032:3000"
+      - "4032:4000"
+    networks:
+      - pbft_network
+  node33:
+    build: ./node
+    container_name: node33
+    hostname: node33
+    environment:
+      - HOSTNAME=node33
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node33:/app/data 
+    ports:
+      - "3033:3000"
+      - "4033:4000"
+    networks:
+      - pbft_network
+  node34:
+    build: ./node
+    container_name: node34
+    hostname: node34
+    environment:
+      - HOSTNAME=node34
+      - NODE_COUNT=34
+    volumes:
+      - ./node/data/node34:/app/data 
+    ports:
+      - "3034:3000"
+      - "4034:4000"
     networks:
       - pbft_network
 
@@ -273,7 +483,7 @@ services:
     hostname: pbft-client
     environment:
       - HOSTNAME=pbft-client
-      - NODE_COUNT=19
+      - NODE_COUNT=34
     depends_on:
       - node1
       - node2
@@ -294,6 +504,21 @@ services:
       - node17
       - node18
       - node19
+      - node20
+      - node21
+      - node22
+      - node23
+      - node24
+      - node25
+      - node26
+      - node27
+      - node28
+      - node29
+      - node30
+      - node31
+      - node32
+      - node33
+      - node34
     networks:
       - pbft_network
     ports:
