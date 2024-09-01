@@ -42,9 +42,12 @@ plt.plot(process_count, exponential(process_count, *popt), '--', label='Exponent
 # Aggiungi etichette e titolo
 plt.xlabel('Number of Processes')
 plt.ylabel('Latency (ms)')
-plt.title('Latency vs Number of Processes (No Faulty)')
+# plt.title('Latency vs Number of Processes (No Faulty)')
 plt.legend()
 plt.grid(True)
+
+# Salva il grafico come file immagine
+plt.savefig('latency_vs_processes_no_faulty.pdf')
 
 # Mostra il grafico
 plt.show()

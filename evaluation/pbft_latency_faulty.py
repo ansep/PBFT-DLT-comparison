@@ -23,17 +23,20 @@ for faulty_count in faulty_counts:
     for i in range(1, 6):
         latency_col = f'latency{i}'
         if latency_col in df_filtered.columns:
-            plt.bar(process_count + (i-3)*0.1, df_filtered[latency_col], width=0.1, label=f'Latency {i}')
+            plt.bar(process_count + (i-3)*0.1, df_filtered[latency_col], width=0.1, label=f'Test {i}')
     
     # Aggiungi etichette e titolo
     plt.xlabel('Number of Processes')
     plt.ylabel('Latency (ms)')
-    plt.title(f'Latency Distribution vs Number of Processes (Faulty Count = {faulty_count})')
+    # plt.title(f'Latency Distribution vs Number of Processes (Faulty Count = {faulty_count})')
     plt.legend()
     plt.grid(True)
     
     # Imposta i tick dell'asse x per mostrare tutti i valori di process_count
     plt.xticks(process_count)
-    
+
+    # Salva il grafico come file PDF
+    plt.savefig(f'latency_distribution_faulty_count_{faulty_count}.pdf')
+
     # Mostra il grafico
     plt.show()
