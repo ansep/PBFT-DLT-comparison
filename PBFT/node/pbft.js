@@ -9,19 +9,38 @@ const crypto = require("crypto");
 const fs = require("fs");
 app.use(bodyParser.json());
 
-const nodes = ["node1", "node2", "node3", "node4", "node5"];
+const nodeCount = parseInt(process.env.NODE_COUNT, 10);
+
+// Create the nodes array dynamically based on nodeCount
+const nodes = [];
+for (let i = 1; i <= nodeCount; i++) {
+  nodes.push(`node${i}`);
+}
 
 let faultyNodes = new Set();
 
 // To have first primary as faulty, put at false if you want normal behaviour
 let faulty_example = false;
-if (process.env.HOSTNAME == "node1") {
-  faulty_example = true;
-  faultyNodes.add(process.env.HOSTNAME);
-}
-if (process.env.HOSTNAME == "node2") {
-  faulty_example = true;
-}
+
+// Code to create faulty process
+//if (process.env.HOSTNAME == "node1") {
+//  faulty_example = true;
+//}
+//if (process.env.HOSTNAME == "node2") {
+//  faulty_example = true;
+//}
+//if (process.env.HOSTNAME == "node3") {
+//  faulty_example = true;
+//}
+//if (process.env.HOSTNAME == "node4") {
+//  faulty_example = true;
+//}
+//if (process.env.HOSTNAME == "node5") {
+//  faulty_example = true;
+//}
+//if (process.env.HOSTNAME == "node6") {
+//  faulty_example = true;
+//}
 
 let currentState = {};
 let log = [];
@@ -81,7 +100,7 @@ function initializeNode() {
     // console.log("Generating new keys for the node...");
     generateKeys();
   }
-  setTimeout(distributePublicKey, 1000);
+  setTimeout(distributePublicKey, 30000);
 }
 
 initializeNode();
