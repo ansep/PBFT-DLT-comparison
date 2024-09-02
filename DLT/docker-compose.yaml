@@ -1,87 +1,74 @@
 version: '3.8'
 
 services:
+
   node0:
-    build:
-      context: .
-      args:
-        ID: 0
+    image: tendermint/tendermint:latest
     container_name: tendermint_node0
     depends_on:
       - abci0
-    ports:
-      - "26656:26656"
-      - "26657:26657"
     volumes:
-      - ./node0:/tendermint
-    environment:
-      - ID=0
+      - "./node0:/tendermint"
     networks:
       localnet:
         ipv4_address: 192.167.10.2
+    ports:
+      - "26656-26657:26656-26657"
+    command:
+      - node
 
   node1:
-    build:
-      context: .
-      args:
-        ID: 1
+    image: tendermint/tendermint:latest
     container_name: tendermint_node1
     depends_on:
       - abci1
-    ports:
-      - "26658:26656"
-      - "26659:26657"
     volumes:
-      - ./node1:/tendermint
-    environment:
-      - ID=1
+      - "./node1:/tendermint"
     networks:
       localnet:
         ipv4_address: 192.167.10.3
+    ports:
+      - "26658-26659:26656-26657"
+    command:
+      - node
 
   node2:
-    build:
-      context: .
-      args:
-        ID: 2
+    image: tendermint/tendermint:latest
     container_name: tendermint_node2
     depends_on:
       - abci2
-    ports:
-      - "26660:26656"
-      - "26661:26657"
     volumes:
-      - ./node2:/tendermint
-    environment:
-      - ID=2
+      - "./node2:/tendermint"
     networks:
       localnet:
         ipv4_address: 192.167.10.4
+    ports:
+      - "26660-26661:26656-26657"
+    command:
+      - node
 
   node3:
-    build:
-      context: .
-      args:
-        ID: 3
+    image: tendermint/tendermint:latest
     container_name: tendermint_node3
     depends_on:
       - abci3
-    ports:
-      - "26662:26656"
-      - "26663:26657"
     volumes:
-      - ./node3:/tendermint
-    environment:
-      - ID=3
+      - "./node3:/tendermint"
     networks:
       localnet:
         ipv4_address: 192.167.10.5
+    ports:
+      - "26662-26663:26656-26657"
+    command:
+      - node
 
   abci0:
     build:
       context: ./js-abci
       dockerfile: Dockerfile
     container_name: abci0
+    volumes:
+      - ./abci0:/app/db
     tty: true
     networks:
       localnet:
@@ -92,6 +79,8 @@ services:
       context: ./js-abci
       dockerfile: Dockerfile
     container_name: abci1
+    volumes:
+      - ./abci1:/app/db
     tty: true
     networks:
       localnet:
@@ -102,6 +91,8 @@ services:
       context: ./js-abci
       dockerfile: Dockerfile
     container_name: abci2
+    volumes:
+      - ./abci2:/app/db
     tty: true
     networks:
       localnet:
@@ -112,6 +103,8 @@ services:
       context: ./js-abci
       dockerfile: Dockerfile
     container_name: abci3
+    volumes:
+      - ./abci3:/app/db
     tty: true
     networks:
       localnet:

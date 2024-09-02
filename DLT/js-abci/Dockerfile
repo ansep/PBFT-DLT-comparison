@@ -16,4 +16,4 @@ EXPOSE 26658
 
 
 # Command to run your application
-CMD ["node", "example/counter.js"]
+CMD ["node", "state/abci.js"]

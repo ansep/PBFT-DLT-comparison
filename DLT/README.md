@@ -2,7 +2,23 @@
 
 ## Overview
 
-This document provides a formal explanation of setting up a Tendermint cluster using Docker Compose. The cluster consists of multiple Tendermint nodes and ABCI servers running in separate Docker containers. 
+This document provides a formal explanation of setting up a Tendermint cluster using Docker Compose. The cluster consists of multiple Tendermint nodes and ABCI servers running in separate Docker containers.
+
+## Tendermint nodes initialization
+
+The first operation is to initialize the nodes. This is done by running the following script:
+
+### Linux:
+
+```bash
+./initialize_nodes_linux.sh <number_of_nodes>
+```
+
+### Windows (PowerShell):
+
+```bash
+./initialize_nodes_windows.ps1 <number_of_nodes>
+```
 
 ## Docker Compose Configuration
 
@@ -38,31 +54,30 @@ curl -s localhost:26657/status
 
 Transactions can be submitted to the Tendermint nodes using the `/broadcast_tx_commit` endpoint. For example:
 
-
 With the dummy app running (go down for our implementetion), we can send transactions:
 
 ```
-curl -s 'localhost:46657/broadcast_tx_commit?tx="abcd"'
+curl -s 'localhost:26657/broadcast_tx_commit?tx=":alice:bob:52"'
 ```
 
 and check that it worked with:
 
 ```
-curl -s 'localhost:46657/abci_query?data="abcd"'
+curl -s 'localhost:26657/abci_query?data="abcd"'
 ```
 
 We can send transactions with a key and value too:
 
 ```
-curl -s 'localhost:46657/broadcast_tx_commit?tx="name=satoshi"'
+curl -s 'localhost:26657/broadcast_tx_commit?tx="name=satoshi"'
 ```
 
 and query the key:
 
 ```
-curl -s 'localhost:46657/abci_query?data="name"'
+curl -s 'localhost:26657/abci_query?data="name"'
 # query the key at other node
-curl -s 'localhost:36657/abci_query?data="name"'
+curl -s 'localhost:26659/abci_query?data="name"'
 {
   "jsonrpc": "2.0",
   "id": "",
@@ -83,11 +98,9 @@ Since we are using for now counter.js example.. so, transactions has to be sent 
 
 curl localhost:26657/broadcast_tx_commit?tx=0x00
 
-
 ## Important Notes
 
 - Each Tendermint node will attempt to dial its peers specified in the `p2p.persistent_peers` configuration. During the initial startup, there may be warnings indicating that seed nodes are offline. This behavior is expected.
-  
 - Each node will also attempt to dial itself, resulting in a dialing error message. This error can be ignored as it does not affect the functionality of the cluster.
 
 ## Additional Considerations
@@ -95,7 +108,6 @@ curl localhost:26657/broadcast_tx_commit?tx=0x00
 - **Database Backend**: The configuration specifies the use of Go LevelDB (`goleveldb`) as the database backend. This backend is stable and widely used in Tendermint deployments.
 
 - **Debugging**: Debug logging is enabled for ABCI (`abci*`) to facilitate troubleshooting and monitoring of ABCI server interactions.
-
 
 ## Cluster of Nodes
 
