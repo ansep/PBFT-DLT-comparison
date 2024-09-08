@@ -8,22 +8,27 @@ def exponential(x, a, b, c):
     return a * np.exp(b * x) + c
 
 # Leggi il file CSV
-df = pd.read_csv('pbft_latency.csv')
+df = pd.read_csv('latency_dlt.csv')
 
-# Filtra le righe con faulty_count = 0
-df_no_faulty = df[df['faulty_count'] == 0]
+# Calcola le latenze per ogni test
+for i in range(1, 4):  # Assumiamo che ci siano al massimo 3 test per nodo
+    init_col = f'test{i}_init'
+    fine_col = f'test{i}_fine'
+    if init_col in df.columns and fine_col in df.columns:
+        df[f'latency{i}'] = (pd.to_datetime(df[fine_col]) - pd.to_datetime(df[init_col])).dt.total_seconds() * 1000
 
 # Calcola la media delle latenze
-df_no_faulty['latency_mean'] = df_no_faulty[['latency1', 'latency2', 'latency3', 'latency4', 'latency5']].mean(axis=1)
+latency_columns = [col for col in df.columns if col.startswith('latency')]
+df['latency_mean'] = df[latency_columns].mean(axis=1)
 
 # Calcola l'intervallo delle latenze (differenza tra max e min)
-latency_min = df_no_faulty[['latency1', 'latency2', 'latency3', 'latency4', 'latency5']].min(axis=1)
-latency_max = df_no_faulty[['latency1', 'latency2', 'latency3', 'latency4', 'latency5']].max(axis=1)
-latency_error = [df_no_faulty['latency_mean'] - latency_min, latency_max - df_no_faulty['latency_mean']]
+latency_min = df[latency_columns].min(axis=1)
+latency_max = df[latency_columns].max(axis=1)
+latency_error = [df['latency_mean'] - latency_min, latency_max - df['latency_mean']]
 
 # Estrai i valori per il grafico
-process_count = df_no_faulty['Nodes']
-latency_mean = df_no_faulty['latency_mean']
+process_count = df['Nodes']
+latency_mean = df['latency_mean']
 
 # Crea il grafico
 plt.figure(figsize=(10, 6))
@@ -37,12 +42,13 @@ plt.plot(process_count, exponential(process_count, *popt), '--', label='Exponent
 # Aggiungi etichette e titolo
 plt.xlabel('Number of nodes')
 plt.ylabel('Latency (ms)')
-# plt.title('Latency vs Number of Processes (No Faulty)')
 plt.legend()
 plt.grid(True)
 
 # Salva il grafico come file immagine
-plt.savefig('latency_vs_processes_no_faulty.pdf')
+plt.savefig('latency_vs_processes.pdf')
 
 # Mostra il grafico
 plt.show()
+
+print(f"Equazione del fit esponenziale: y = {popt[0]:.2f} * exp({popt[1]:.4f} * x) + {popt[2]:.2f}")

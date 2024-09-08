@@ -38,15 +38,17 @@ for ((i=0; i<NUM_NODES; i++)); do
     cat <<EOF >> localnet.mk
 	sed -i 's/create_empty_blocks = true/create_empty_blocks = false/' build/node${i}/config/config.toml
 	sed -i 's/pex = true/pex = false/' build/node${i}/config/config.toml
-	sed -i 's/timeout_propose = "3s"/timeout_propose = "12s"/' build/node${i}/config/config.toml
-	sed -i 's/timeout_propose_delta = "500ms"/timeout_propose_delta = "2000ms"/' build/node${i}/config/config.toml
-	sed -i 's/timeout_prevote = "1s"/timeout_prevote = "4s"/' build/node${i}/config/config.toml
-	sed -i 's/timeout_prevote_delta = "500ms"/timeout_prevote_delta = "2000ms"/' build/node${i}/config/config.toml
-	sed -i 's/timeout_precommit = "1s"/timeout_precommit = "4s"/' build/node${i}/config/config.toml
-	sed -i 's/timeout_precommit_delta = "500ms"/timeout_precommit_delta = "2000ms"/' build/node${i}/config/config.toml
-	sed -i 's/timeout_commit = "1s"/timeout_commit = "4s"/' build/node${i}/config/config.toml
 EOF
 done
+
+# Add this to the previous block of loop code to have the change of timeout in localnet.mk
+# sed -i 's/timeout_propose = "3s"/timeout_propose = "12s"/' build/node${i}/config/config.toml
+#	sed -i 's/timeout_propose_delta = "500ms"/timeout_propose_delta = "2000ms"/' build/node${i}/config/config.toml
+#	sed -i 's/timeout_prevote = "1s"/timeout_prevote = "4s"/' build/node${i}/config/config.toml
+#	sed -i 's/timeout_prevote_delta = "500ms"/timeout_prevote_delta = "2000ms"/' build/node${i}/config/config.toml
+#	sed -i 's/timeout_precommit = "1s"/timeout_precommit = "4s"/' build/node${i}/config/config.toml
+#	sed -i 's/timeout_precommit_delta = "500ms"/timeout_precommit_delta = "2000ms"/' build/node${i}/config/config.toml
+#	sed -i 's/timeout_commit = "1s"/timeout_commit = "4s"/' build/node${i}/config/config.toml
 
 # Add docker-compose up command
 cat <<EOF >> localnet.mk

@@ -2,143 +2,120 @@
 
 ## Overview
 
-This document provides a formal explanation of setting up a Tendermint cluster using Docker Compose. The cluster consists of multiple Tendermint nodes and ABCI servers running in separate Docker containers.
+This document provides a formal explanation of setting up a Tendermint cluster using Docker Compose. The cluster consists of multiple Tendermint nodes running in separate Docker containers and ABCI server installed in Ubuntu local machine.
 
-## Tendermint nodes initialization
+The diagram below illustrates the basic functioning of Tendermint: 
 
-The first operation is to initialize the nodes. This is done by running the following script:
+![Tendermint_logic](PBFT-DLT-comparison/evaluation/images/Tendermint_logic.png)
 
-### Linux:
+## Docker Compose configuration for Tendermint local network
+
+This `docker-compose.yml` sets up a local Tendermint network with n nodes. Each node runs in its own Docker container using the `tendermint/localnode` image and communicates over a custom network named `localnet`.
+
+- **nodes**: Each node is configured with a unique ID and exposed ports for P2P (`26656`) and RPC (`26657`) communication.
+- **ports**: Maps container ports to host ports.
+- **environment**: Sets environment variables (`ID` for the node ID, `LOG` for the log file location).
+- **volumes**: Mounts the local `./build` directory to `/tendermint` in each container.
+- **networks**: Assigns a static IP address in the `localnet` network.
+- **localnet**: A custom Docker bridge network with a specified subnet (`192.167.0.0/16`).
+
+
+
+## Tendermint Installation
+
+To install Tendermint, you will first need to install Go and set up the necessary environment variables.
+
+Make sure Go is installed on your system. If not, you can download it from [golang.org](https://golang.org/dl/).
+
+After installing Go, set up your Go environment by adding the following lines to your `~/.bash_profile`:
 
 ```bash
-./initialize_nodes_linux.sh <number_of_nodes>
+echo export GOPATH="\$HOME/go" >> ~/.bash_profile
+echo export PATH="\$PATH:\$GOPATH/bin" >> ~/.bash_profile
+source ~/.bash_profile
 ```
 
-### Windows (PowerShell):
+Clone the Tendermint repository from GitHub:
 
 ```bash
-./initialize_nodes_windows.ps1 <number_of_nodes>
+git clone https://github.com/tendermint/tendermint.git
+cd tendermint
 ```
 
-## Docker Compose Configuration
+To build and install Tendermint, run:
 
-The Docker Compose configuration defines services for each Tendermint node (`node0`, `node1`, `node2`, `node3`) and their corresponding ABCI servers (`abci0`, `abci1`, `abci2`, `abci3`). Each node and ABCI server are connected to a custom Docker network named `localnet` with specific IP addresses assigned to each container.
-
-The configuration mounts local directories (`./node0`, `./node1`, `./node2`, `./node3`) as volumes in the Tendermint containers, allowing for persistence of blockchain data and configuration files. The ports `26656` and `26657` are exposed for Tendermint node RPC and P2P communication.
-
-## Initialization and Usage
-
-To initialize the Tendermint cluster, run the following command in the terminal:
-
-```
-sudo docker-compose up --build
+```bash
+make install
 ```
 
-To shut down the cluster, use the following command:
+To build the Tendermint binary:
 
-```
-sudo docker-compose down
-```
-
-To access the shell of a specific Tendermint node, use the following command:
-
-```
-sudo docker exec -it node0 /bin/bash
+```bash
+make build
 ```
 
-To check the status of a Tendermint node, send a GET request to its RPC endpoint:
+Check the installed Tendermint version:
 
+```bash
+tendermint version
 ```
+
+To install the ABCI application, run:
+
+```bash
+make install_abci
+```
+
+Copy `localnet.mk` and `generate_makefile.sh` in your Tendermint directory. Replace the existing `docker-compose.yml`.
+
+
+## Tendermint nodes initialization 
+
+To initialize the Tendermint makefile:
+
+```bash
+./generate_makefile.sh <number_of_nodes>
+```
+
+To remove old Tendermint nodes:
+
+```bash
+sudo rm -rf ./build/node*
+```
+
+To start the cluster:
+
+```bash
+make localnet-start
+```
+
+To check the status of a Tendermint node:
+
+```bash
 curl -s localhost:26657/status
 ```
 
-Transactions can be submitted to the Tendermint nodes using the `/broadcast_tx_commit` endpoint. For example:
+Transactions can be submitted to the Tendermint nodes using the `/broadcast_tx_commit` endpoint. We can send transactions:
 
-With the dummy app running (go down for our implementetion), we can send transactions:
-
-```
-curl -s 'localhost:26657/broadcast_tx_commit?tx=":alice:bob:52"'
+```bash
+curl -s 'localhost:26657/broadcast_tx_commit?tx="data"'
 ```
 
 and check that it worked with:
 
-```
-curl -s 'localhost:26657/abci_query?data="abcd"'
-```
-
-We can send transactions with a key and value too:
-
-```
-curl -s 'localhost:26657/broadcast_tx_commit?tx="name=satoshi"'
+```bash
+curl -s 'localhost:26657/abci_query?data="data"'
 ```
 
-and query the key:
 
-```
-curl -s 'localhost:26657/abci_query?data="name"'
-# query the key at other node
-curl -s 'localhost:26659/abci_query?data="name"'
-{
-  "jsonrpc": "2.0",
-  "id": "",
-  "result": {
-    "response": {
-      "log": "exists",
-      "index": "-1",
-      "key": "bmFtZQ==",
-      "value": "c2F0b3NoaQ=="
-    }
-  }
-}
-```
+## Important notes
 
-where the value is returned in hex.
+To optimize the Tendermint node configuration, perform the following adjustments:
 
-Since we are using for now counter.js example.. so, transactions has to be sent (app is expecting a transaction with value=last+1):
+1. **Disable empty block creation**: Prevent the creation of empty blocks by modifying the `config.toml` file for nodes. 
 
-curl localhost:26657/broadcast_tx_commit?tx=0x00
+2. **Disable peer exchange**: To disable peer exchange (PEX) and prevent automatic peer discovery, modify the config.toml file for node0 by setting pex to false.
 
-## Important Notes
+3. **Change consensus timeouts**: in the makefile you can change timeouts, look at the `localnet.mk` file.
 
-- Each Tendermint node will attempt to dial its peers specified in the `p2p.persistent_peers` configuration. During the initial startup, there may be warnings indicating that seed nodes are offline. This behavior is expected.
-- Each node will also attempt to dial itself, resulting in a dialing error message. This error can be ignored as it does not affect the functionality of the cluster.
-
-## Additional Considerations
-
-- **Database Backend**: The configuration specifies the use of Go LevelDB (`goleveldb`) as the database backend. This backend is stable and widely used in Tendermint deployments.
-
-- **Debugging**: Debug logging is enabled for ABCI (`abci*`) to facilitate troubleshooting and monitoring of ABCI server interactions.
-
-## Cluster of Nodes
-
-First create four Ubuntu cloud machines. The following was tested on Digital Ocean Ubuntu 16.04 x64 (3GB/1CPU, 20GB SSD). We'll refer to their respective IP addresses below as IP1, IP2, IP3, IP4.
-
-Then, `ssh` into each machine, and execute [this script](https://git.io/vh40C):
-
-```
-curl -L https://git.io/vh40C | bash
-source ~/.profile
-```
-
-This will install `go` and other dependencies, get the Tendermint source code, then compile the `tendermint` binary.
-
-Next, `cd` into `docs/examples`. Each command below should be run from each node, in sequence:
-
-```
-abci-cli dummy --addr="tcp://IP1:46658"
-abci-cli dummy --addr="tcp://IP2:46658"
-abci-cli dummy --addr="tcp://IP3:46658"
-abci-cli dummy --addr="tcp://IP4:46658"
-
-tendermint node --home ./node1 --proxy_app=tcp://IP1:46658 --p2p.seeds IP2:46656,IP3:46656,IP4:46656 --consensus.create_empty_blocks=false
-
-tendermint node --home ./node2 --proxy_app=tcp://IP2:46658 --p2p.seeds IP1:46656,IP3:46656,IP4:46656 --consensus.create_empty_blocks=false
-
-tendermint node --home ./node3 --proxy_app=tcp://IP3:46658 --p2p.seeds IP1:46656,IP2:46656,IP4:46656 --consensus.create_empty_blocks=false
-
-tendermint node --home ./node4 --proxy_app=tcp://IP4:46658 --p2p.seeds IP1:46656,IP2:46656,IP3:46656 --consensus.create_empty_blocks=false
-```
-
-Note that after the third node is started, blocks will start to stream in because >2/3 of validators (defined in the `genesis.json`) have come online. Seeds can also be specified in the `config.toml`. See [this PR](https://github.com/tendermint/tendermint/pull/792) for more information about configuration options.
-
-Transactions can then be sent as covered in the single, local node example above.
+4. **Windows configuration**: our implementation in not available in windows.
