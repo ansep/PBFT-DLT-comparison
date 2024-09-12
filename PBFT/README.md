@@ -6,7 +6,7 @@ This document provides a formal explanation of setting up a PBFT cluster using D
 
 The diagram below illustrates the basic functioning of PBFT algorithm: 
 
-![pbft_logic](PBFT-DLT-comparison/evaluation/images/pbft_logic.png)
+![pbft_logic](PBFT-DLT-comparison/evaluation/images/logic_pbft.png)
 
 ## Build and Start the Docker Containers
 
