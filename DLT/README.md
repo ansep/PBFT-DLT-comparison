@@ -6,7 +6,7 @@ This document provides a formal explanation of setting up a Tendermint cluster u
 
 The diagram below illustrates the basic functioning of Tendermint: 
 
-![Tendermint_logic](PBFT-DLT-comparison/evaluation/images/Tendermint_logic.png)
+![Tendermint_logic](https://github.com/ansep/PBFT-DLT-comparison/blob/main/evaluation/images/logic_tendermint.png)
 
 ## Docker Compose configuration for Tendermint local network
 
