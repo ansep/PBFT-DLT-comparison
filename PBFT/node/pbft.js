@@ -53,6 +53,7 @@ let commitCount = {};
 let replies = {};
 let consensusReached = {};
 let socketClient = {};
+let round = 0;
 
 const privateKeyPath = "./privateKey.pem";
 const publicKeyPath = "./publicKey.pem";
@@ -100,7 +101,7 @@ function initializeNode() {
     // console.log("Generating new keys for the node...");
     generateKeys();
   }
-  setTimeout(distributePublicKey, 30000);
+  setTimeout(distributePublicKey, 5000);
 }
 
 initializeNode();
@@ -148,6 +149,7 @@ function switchView() {
   while (crashedNodes.has(nodes[view]) || faultyNodes.has(nodes[view])) {
     view = (view + 1) % nodes.length;
   }
+  round += 1;
   primary = nodes[view];
   console.log(`Switched to view ${view}. Primary: ${primary}`);
 }
@@ -194,7 +196,7 @@ async function handleRequest(clientSignedMessage, socket) {
   console.log(
     `TCP Message received: ${type}, Data: ${JSON.stringify(data)}, Seq: ${seq}`
   );
-
+  round = 1;
   try {
     db.query("INSERT INTO consensus VALUES (?, ?, ?, ?, ?, ?, ?, ?)", [
       type,
@@ -203,7 +205,7 @@ async function handleRequest(clientSignedMessage, socket) {
       JSON.stringify(data),
       client,
       false,
-      1,
+      round,
       Date.now(),
     ]);
   } catch (error) {
@@ -243,7 +245,7 @@ async function handleRequest(clientSignedMessage, socket) {
         }
       }
     } else if (data.type === "get_state") {
-      //TODO: do same way of transaction
+      // do same way of transaction
       console.log("Node is primary, broadcasting PrePrepare for get_state");
       broadcast({ type: "pre-prepare", data, seq });
     } else {
@@ -362,7 +364,7 @@ function handleRequest_afterFaulty(clientSignedMessage) {
         }
       }
     } else if (data.type === "get_state") {
-      //TODO: do same way of transaction
+      // do same way of transaction
       console.log("Node is primary, broadcasting PrePrepare for get_state");
       broadcast({ type: "pre-prepare", data, seq });
     } else {
@@ -393,7 +395,7 @@ function handlePrePrepare(body, clientSignedMessage) {
   console.log("Handling PrePrepare");
 
   // Verify that the pre-prepare message is sent by the current primary
-  // TODO: it has not accepted a pre-prepare message for view v
+  // it has not accepted a pre-prepare message for view v
   if (body.sent_by === primary) {
     console.log(
       "PrePrepare message is from the primary. Broadcasting prepare."
@@ -425,15 +427,18 @@ function handlePrePrepare(body, clientSignedMessage) {
       };
       const { signature } = signMessage(newBody);
 
-      if (!crashedNodes.has(process.env.HOSTNAME) && !faultyNodes.has(process.env.HOSTNAME)) {
+      if (
+        !crashedNodes.has(process.env.HOSTNAME) &&
+        !faultyNodes.has(process.env.HOSTNAME)
+      ) {
         broadcast({
           body: newBody,
           signature,
           clientSignedMessage,
         });
-      }      
+      }
     } else {
-      console.log("Sequence number not found in Request phase");
+      // console.log("Sequence number not found in Request phase");
       if (!faultyNodes.has(body.sent_by)) {
         faultyNodes.add(body.sent_by);
         console.error(`Node ${body.sent_by} suspected faulty`);
@@ -503,7 +508,7 @@ function handlePrepare(body, clientSignedMessage) {
   );
   // prepareCount[body.seq].length >= requiredPrepareCount
 
-  // TODO: Add check timeout to see if the checkPrepareCount is not passed in fast time, probably there are too many faulty processes or primary is faulty
+  // Add check timeout to see if the checkPrepareCount is not passed in fast time, probably there are too many faulty processes or primary is faulty
   // Try to change primary and see if the PBFT works
   // So we need a function that allows faulty actions by the primary, that will lead to not accepted messages (There is always the check of the signature of the client)
   if (checkPrepareCount(prepareCount[body.seq], body.seq)) {
@@ -519,13 +524,16 @@ function handlePrepare(body, clientSignedMessage) {
         sent_by: process.env.HOSTNAME,
       };
       const { signature } = signMessage(newBody);
-      if (!crashedNodes.has(process.env.HOSTNAME) && !faultyNodes.has(process.env.HOSTNAME)) {
+      if (
+        !crashedNodes.has(process.env.HOSTNAME) &&
+        !faultyNodes.has(process.env.HOSTNAME)
+      ) {
         broadcast({
           body: newBody,
           signature,
           clientSignedMessage,
         });
-      } 
+      }
     } else {
       console.log(`Commit message for seq ${body.seq} already broadcasted.`);
     }
@@ -533,7 +541,10 @@ function handlePrepare(body, clientSignedMessage) {
 }
 
 async function handleCommit(body, clientSignedMessage) {
-  if (!crashedNodes.has(process.env.HOSTNAME) && !faultyNodes.has(process.env.HOSTNAME)) {
+  if (
+    !crashedNodes.has(process.env.HOSTNAME) &&
+    !faultyNodes.has(process.env.HOSTNAME)
+  ) {
     console.log("Handling Commit");
     // Initialize commit count for this sequence number if it doesn't exist
     if (commitCount[body.seq] === undefined) {
@@ -577,7 +588,7 @@ async function handleCommit(body, clientSignedMessage) {
             return;
           }
 
-          // TODO: check sequential order of requests from clients
+          // check sequential order of requests from clients
 
           // Check balance before proceeding
           const fromBalance = await getBalance(from);
@@ -616,7 +627,7 @@ async function handleCommit(body, clientSignedMessage) {
                       JSON.stringify(clientSignedMessage.message.data),
                       newBody.sent_by,
                       newBody.success,
-                      1,
+                      round,
                       Date.now(),
                     ]
                   );
@@ -667,7 +678,6 @@ async function handleCommit(body, clientSignedMessage) {
     }
   }
 }
-
 
 function isPrimary() {
   return process.env.HOSTNAME == primary;
@@ -817,7 +827,7 @@ app.post("/message", async (req, res) => {
                   JSON.stringify(clientSignedMessage.message.data),
                   body.sent_by,
                   false,
-                  1,
+                  round,
                   Date.now(),
                 ]
               );
@@ -829,7 +839,6 @@ app.post("/message", async (req, res) => {
             }
             switch (body.type) {
               case "pre-prepare":
-                // TODO:
                 // The message is processed only if no other message with same view and sequence number has been processed
                 handlePrePrepare(body, clientSignedMessage);
                 break;
