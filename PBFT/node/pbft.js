@@ -47,7 +47,7 @@ let log = [];
 let view = 0; // View number
 let primary = nodes[view % nodes.length];
 let sequenceNumber = 0; // Message sequence number
-let prePrepareCount = {};
+let prePrepareReceived = {};
 let prepareCount = {};
 let commitCount = {};
 let replies = {};
@@ -61,7 +61,7 @@ const clientPublicKeyPath = "./public_key_client.pem";
 const publicKeys = new Map(); // Store public keys with node address as key
 
 // Calculate the required prepare count to reach consensus
-const requiredPrepareCount = Math.floor((2 * (nodes.length - 1)) / 3);
+const requiredPrepareCount = Math.floor((2 * (nodes.length - 1)) / 3) + 1;
 
 function generateKeys() {
   const { publicKey, privateKey } = crypto.generateKeyPairSync("rsa", {
@@ -132,7 +132,7 @@ function verifySignature(data, publicKey) {
 }
 
 function broadcast(message) {
-  console.log(`Broadcasting message: ${JSON.stringify(message)}`);
+  console.log(Date.now(), `Broadcasting message: ${JSON.stringify(message)}`);
   nodes.forEach((node) => {
     if (
       // Considering broadcast also to self
@@ -151,7 +151,7 @@ function switchView() {
   }
   round += 1;
   primary = nodes[view];
-  console.log(`Switched to view ${view}. Primary: ${primary}`);
+  console.log(Date.now(), `Switched to view ${view}. Primary: ${primary}`);
 }
 
 function sendFaultyMessage(clientSignedMessage) {
@@ -179,7 +179,7 @@ function sendFaultyMessage(clientSignedMessage) {
 }
 
 function broadcastToNode(node, message) {
-  console.log(`Broadcasting message: ${JSON.stringify(message)}`);
+  console.log(Date.now(), `Broadcasting message: ${JSON.stringify(message)}`);
   if (
     // Considering broadcast also to self
     // node !== `http://${process.env.HOSTNAME}:3000` &&
@@ -194,7 +194,8 @@ async function handleRequest(clientSignedMessage, socket) {
   const { type, data, seq, client } = message;
   log.push({ type, data, seq, client });
   console.log(
-    `TCP Message received: ${type}, Data: ${JSON.stringify(data)}, Seq: ${seq}`
+    Date.now(),
+    `TCP Message received: ${type}, Data: ${JSON.stringify(data)}`
   );
   round = 1;
   try {
@@ -209,13 +210,16 @@ async function handleRequest(clientSignedMessage, socket) {
       Date.now(),
     ]);
   } catch (error) {
-    console.error("Error inserting into consensus table:", error.message);
+    console.error(
+      Date.now(),
+      "Error inserting into consensus table:",
+      error.message
+    );
   }
 
-  console.log("Handling Request");
+  console.log(Date.now(), "Handling Request");
   // Ensure consensusReached is initially set to false
   consensusReached[seq] = false;
-  console.log(consensusReached[seq]);
   socketClient[seq] = socket;
   const hash = crypto
     .createHash("sha256")
@@ -228,7 +232,7 @@ async function handleRequest(clientSignedMessage, socket) {
     // Check if the request is a transaction or a state request
     if (data.type === undefined) {
       if (isPrimary()) {
-        console.log("Node is primary, broadcasting PrePrepare");
+        console.log(Date.now(), "Node is primary, broadcasting PrePrepare");
         if (faulty_example == false) {
           const body = {
             type: "pre-prepare",
@@ -246,10 +250,13 @@ async function handleRequest(clientSignedMessage, socket) {
       }
     } else if (data.type === "get_state") {
       // do same way of transaction
-      console.log("Node is primary, broadcasting PrePrepare for get_state");
+      console.log(
+        Date.now(),
+        "Node is primary, broadcasting PrePrepare for get_state"
+      );
       broadcast({ type: "pre-prepare", data, seq });
     } else {
-      console.error("Invalid request type:", data.type);
+      console.error(Date.now(), "Invalid request type:", data.type);
       const errorMessage = {
         body: {
           type: "error",
@@ -260,7 +267,7 @@ async function handleRequest(clientSignedMessage, socket) {
       socket.write(JSON.stringify(errorMessage));
     }
   } catch (error) {
-    console.error("Error handling request:", error.message);
+    console.error(Date.now(), "Error handling request:", error.message);
     const errorMessage = {
       body: {
         type: "error",
@@ -279,10 +286,10 @@ async function getCurrentState() {
     rows.forEach((row) => {
       state[row.username] = { balance: row.balance };
     });
-    console.log("Current state retrieved:", state);
+    console.log(Date.now(), "Current state retrieved:", state);
     return state;
   } catch (error) {
-    console.error("Error retrieving current state:", error.message);
+    console.error(Date.now(), "Error retrieving current state:", error.message);
     throw error;
   }
 }
@@ -295,7 +302,11 @@ async function accountExists(account) {
     );
     return result[0].count > 0;
   } catch (error) {
-    console.error("Error checking account existence:", error.message);
+    console.error(
+      Date.now(),
+      "Error checking account existence:",
+      error.message
+    );
     return false;
   }
 }
@@ -308,7 +319,7 @@ async function getBalance(account) {
     );
     return result[0].balance || 0;
   } catch (error) {
-    console.error("Error fetching balance:", error.message);
+    console.error(Date.now(), "Error fetching balance:", error.message);
     return 0;
   }
 }
@@ -316,11 +327,11 @@ async function getBalance(account) {
 function startConsensusTimer(seq, clientSignedMessage) {
   setTimeout(() => {
     if (!consensusReached[seq]) {
-      console.log("Timeout reached. Consensus not achieved.");
+      console.log(Date.now(), "Timeout reached. Consensus not achieved.");
       if (isPrimary()) {
         handleRequest_afterFaulty(clientSignedMessage);
       } else {
-        console.log("Not primary, restarting timer...");
+        console.log(Date.now(), "Not primary, restarting timer...");
         startConsensusTimer(seq, clientSignedMessage); // Restart the timer
       }
     }
@@ -331,14 +342,11 @@ function handleRequest_afterFaulty(clientSignedMessage) {
   const { message, signature } = clientSignedMessage;
   const { type, data, seq, client } = message;
   log.push({ type, data, seq, client });
-  //console.log(
-  //  `TCP Message received: ${type}, Data: ${JSON.stringify(data)}, Seq: ${seq}`
-  //);
 
-  console.log("Handling Request again after the view change");
+  console.log(Date.now(), "Handling Request again after the view change");
   // Ensure consensusReached is initially set to false
   consensusReached[seq] = false;
-  console.log(consensusReached[seq]);
+  console.log(Date.now(), consensusReached[seq]);
   const hash = crypto
     .createHash("sha256")
     .update(JSON.stringify(message))
@@ -347,7 +355,7 @@ function handleRequest_afterFaulty(clientSignedMessage) {
     // Check if the request is a transaction or a state request
     if (data.type === undefined) {
       if (isPrimary() && process.env.HOSTNAME != "node1") {
-        console.log("Node is primary, broadcasting PrePrepare");
+        console.log(Date.now(), "Node is primary, broadcasting PrePrepare");
         if (faulty_example == false) {
           const body = {
             type: "pre-prepare",
@@ -365,10 +373,13 @@ function handleRequest_afterFaulty(clientSignedMessage) {
       }
     } else if (data.type === "get_state") {
       // do same way of transaction
-      console.log("Node is primary, broadcasting PrePrepare for get_state");
+      console.log(
+        Date.now(),
+        "Node is primary, broadcasting PrePrepare for get_state"
+      );
       broadcast({ type: "pre-prepare", data, seq });
     } else {
-      console.error("Invalid request type:", data.type);
+      console.error(Date.now(), "Invalid request type:", data.type);
       const errorMessage = {
         body: {
           type: "error",
@@ -379,7 +390,7 @@ function handleRequest_afterFaulty(clientSignedMessage) {
       socketClient[seq].write(JSON.stringify(errorMessage));
     }
   } catch (error) {
-    console.error("Error handling request:", error.message);
+    console.error(Date.now(), "Error handling request:", error.message);
     const errorMessage = {
       body: {
         type: "error",
@@ -392,31 +403,22 @@ function handleRequest_afterFaulty(clientSignedMessage) {
 }
 
 function handlePrePrepare(body, clientSignedMessage) {
-  console.log("Handling PrePrepare");
+  console.log(Date.now(), "Handling PrePrepare");
 
   // Verify that the pre-prepare message is sent by the current primary
   // it has not accepted a pre-prepare message for view v
   if (body.sent_by === primary) {
     console.log(
+      Date.now(),
       "PrePrepare message is from the primary. Broadcasting prepare."
     );
     if (body.seq in consensusReached) {
-      if (prePrepareCount[body.seq] === undefined) {
-        prePrepareCount[body.seq] = {
+      if (prePrepareReceived[body.seq] === undefined) {
+        prePrepareReceived[body.seq] = {
           sender: body.sent_by,
           message: clientSignedMessage.message,
         };
       }
-      //else {
-      //  if (!prePrepareCount[body.seq].includes({sender: body.sent_by, message: clientSignedMessage.message})) {
-      //    prePrepareCount[body.seq].push({sender: body.sent_by, message: clientSignedMessage.message});
-      //  }
-      //}
-      console.log(
-        `Pre-Prepare count for seq ${body.seq}: ${
-          prePrepareCount[body.seq].length
-        }`
-      );
 
       const newBody = {
         type: "prepare",
@@ -441,7 +443,7 @@ function handlePrePrepare(body, clientSignedMessage) {
       // console.log("Sequence number not found in Request phase");
       if (!faultyNodes.has(body.sent_by)) {
         faultyNodes.add(body.sent_by);
-        console.error(`Node ${body.sent_by} suspected faulty`);
+        console.error(Date.now(), `Node ${body.sent_by} suspected faulty`);
         if (body.sent_by === primary) {
           switchView();
           if (isPrimary()) {
@@ -460,9 +462,9 @@ function handlePrePrepare(body, clientSignedMessage) {
 let broadcastedCommits = {}; // Track broadcasted commit messages
 
 function checkPrepareCount(prepareCountList, seq) {
-  // Estrai il messaggio di riferimento da prePrepareCount[body.seq]
-  if (prePrepareCount[seq]) {
-    const referenceMessage = prePrepareCount[seq].message;
+  // Estrai il messaggio di riferimento da prePrepareReceived[body.seq]
+  if (prePrepareReceived[seq]) {
+    const referenceMessage = prePrepareReceived[seq].message;
 
     // Conta le occorrenze dei messaggi nella lista prepareCountList
     let messageCount = 0;
@@ -476,15 +478,16 @@ function checkPrepareCount(prepareCountList, seq) {
         messageCount++;
       }
     }
-
-    return messageCount >= Math.floor((2 * (nodes.length - 1)) / 3);
+    // n = 3f + 1 -> f = (n - 1) / 3
+    // min number of messages = 2f + 1 = 2 * (n - 1) / 3 + 1
+    return messageCount >= Math.floor((2 * (nodes.length - 1)) / 3) + 1;
   } else {
-    console.log("Sequence number not found before in Prepare");
+    console.log(Date.now(), "Sequence number not found before in Prepare");
   }
 }
 
 function handlePrepare(body, clientSignedMessage) {
-  console.log("Handling Prepare");
+  // console.log("Handling Prepare");
 
   if (prepareCount[body.seq] === undefined) {
     prepareCount[body.seq] = [
@@ -504,9 +507,11 @@ function handlePrepare(body, clientSignedMessage) {
     }
   }
   console.log(
-    `Prepare count for seq ${body.seq}: ${prepareCount[body.seq].length}`
+    Date.now(),
+    `Handling Prepare from ${body.sent_by}. Prepare count for seq ${
+      body.seq
+    }: ${prepareCount[body.seq].length}`
   );
-  // prepareCount[body.seq].length >= requiredPrepareCount
 
   // Add check timeout to see if the checkPrepareCount is not passed in fast time, probably there are too many faulty processes or primary is faulty
   // Try to change primary and see if the PBFT works
@@ -535,7 +540,14 @@ function handlePrepare(body, clientSignedMessage) {
         });
       }
     } else {
-      console.log(`Commit message for seq ${body.seq} already broadcasted.`);
+      // console.log(
+      //   Date.now(),
+      //   `Handling Prepare from ${body.sent_by}. Prepare count for seq ${
+      //     body.seq
+      //   }: ${
+      //     prepareCount[body.seq].length
+      //   }. Commit message already broadcasted.`
+      // );
     }
   }
 }
@@ -545,7 +557,6 @@ async function handleCommit(body, clientSignedMessage) {
     !crashedNodes.has(process.env.HOSTNAME) &&
     !faultyNodes.has(process.env.HOSTNAME)
   ) {
-    console.log("Handling Commit");
     // Initialize commit count for this sequence number if it doesn't exist
     if (commitCount[body.seq] === undefined) {
       commitCount[body.seq] = [body.sent_by];
@@ -555,11 +566,16 @@ async function handleCommit(body, clientSignedMessage) {
       }
     }
     console.log(
-      `Commit count for seq ${body.seq}: ${commitCount[body.seq].length}`
+      Date.now(),
+      `Handling Commit from ${body.sent_by}. Commit count for seq ${
+        body.seq
+      }: ${commitCount[body.seq].length}`
     );
 
     // Check if consensus is reached
     // Check that preparedCount is true and if commitCount is true
+    // n = 3f + 1 -> f = (n - 1) / 3
+    // min number of messages = 2f + 1 = 2 * (n - 1) / 3 + 1
     if (prepareCount[body.seq].length >= requiredPrepareCount) {
       if (
         commitCount[body.seq].length >=
@@ -567,7 +583,14 @@ async function handleCommit(body, clientSignedMessage) {
       ) {
         if (!consensusReached[body.seq]) {
           consensusReached[body.seq] = true;
-          console.log(consensusReached[body.seq]);
+          console.log(
+            Date.now(),
+            "Consensus reached for seq",
+            body.seq,
+            "with",
+            commitCount[body.seq].length,
+            "messages"
+          );
 
           // Handle Reply
           const { from, to, amount } = clientSignedMessage.message.data; // Ensure `from`, `to`, and `amount` are correctly accessed from `data`
@@ -583,7 +606,7 @@ async function handleCommit(body, clientSignedMessage) {
                 error: `One or more accounts do not exist`,
               },
             };
-            console.error(`One or more accounts do not exist`);
+            console.error(Date.now(), `One or more accounts do not exist`);
             socketClient[body.seq].write(JSON.stringify(errorMessage));
             return;
           }
@@ -595,7 +618,10 @@ async function handleCommit(body, clientSignedMessage) {
 
           if (fromBalance >= amount) {
             try {
-              console.log(`Updating database: ${amount} from ${from} to ${to}`);
+              console.log(
+                Date.now(),
+                `Updating database: ${amount} from ${from} to ${to}`
+              );
               db.query(
                 "UPDATE state SET balance = balance - ? WHERE username = ?",
                 [amount, from]
@@ -615,7 +641,7 @@ async function handleCommit(body, clientSignedMessage) {
                   success: true,
                   transaction: { from, to, amount },
                 };
-                // TODO: sign message and get all public keys from client from nodes at startup
+                // sign message and get all public keys from client from nodes at startup
 
                 try {
                   await db.query(
@@ -634,6 +660,7 @@ async function handleCommit(body, clientSignedMessage) {
                   db.exportDatabase("/app/data/data.db", "/app/data/data.csv");
                 } catch (error) {
                   console.error(
+                    Date.now(),
                     "Error inserting into consensus table:",
                     error.message
                   );
@@ -646,7 +673,11 @@ async function handleCommit(body, clientSignedMessage) {
                 );
               }
             } catch (error) {
-              console.error("Error updating balances:", error.message);
+              console.error(
+                Date.now(),
+                "Error updating balances:",
+                error.message
+              );
               const errorMessage = {
                 body: {
                   type: "Reply",
@@ -658,6 +689,7 @@ async function handleCommit(body, clientSignedMessage) {
             }
           } else {
             console.error(
+              Date.now(),
               `Insufficient balance for transaction: ${JSON.stringify(
                 clientSignedMessage.message.data
               )}`
@@ -693,7 +725,7 @@ function checkNodesHealth() {
         .then((response) => {
           // Node responded, reset suspicion
           if (crashedNodes.has(node)) {
-            console.log(`Node ${node} recovered`);
+            console.log(Date.now(), `Node ${node} recovered`);
             crashedNodes.delete(node);
           }
         })
@@ -701,7 +733,7 @@ function checkNodesHealth() {
           // Node didn't respond, mark as faulty
           if (!crashedNodes.has(node)) {
             crashedNodes.add(node);
-            console.error(`Node ${node} suspected crashed`);
+            console.error(Date.now(), `Node ${node} suspected crashed`);
             if (node === primary) {
               switchView();
             }
@@ -722,7 +754,7 @@ app.get("/health", (req, res) => {
 });
 
 app.post("/transaction", async (req, res) => {
-  console.log("Transaction endpoint hit");
+  console.log(Date.now(), "Transaction endpoint hit");
   const data = req.body;
   const seq = sequenceNumber++;
 
@@ -732,7 +764,7 @@ app.post("/transaction", async (req, res) => {
 
   if (fromBalance >= amount && isPrimary) {
     msg_to_send = { from, to, amount };
-    console.log("Node is primary, broadcasting PrePrepare");
+    console.log(Date.now(), "Node is primary, broadcasting PrePrepare");
     broadcast({
       type: "pre-prepare",
       data: { ...data, sent_by: process.env.HOSTNAME },
@@ -752,7 +784,10 @@ app.post("/transaction", async (req, res) => {
       // For simplicity, this should be done atomically in a real scenario
       currentState[from] -= amount;
       currentState[to] = (currentState[to] || 0) + amount;
-      console.log(`Transaction completed: ${amount} from ${from} to ${to}`);
+      console.log(
+        Date.now(),
+        `Transaction completed: ${amount} from ${from} to ${to}`
+      );
     });
 
     // Once consensus is reached, send response
@@ -762,6 +797,7 @@ app.post("/transaction", async (req, res) => {
     res.send(responseMessage);
   } else {
     console.error(
+      Date.now(),
       `Insufficient balance for transaction: ${JSON.stringify(data)}`
     );
     res
@@ -774,11 +810,14 @@ app.post("/message", async (req, res) => {
   const { body, signature, clientSignedMessage } = req.body;
   const publicKey = publicKeys.get(body.sent_by);
   if (!publicKey) {
-    console.error(`Public key not found for node: ${body.sent_by}`);
+    console.error(Date.now(), `Public key not found for node: ${body.sent_by}`);
     return res.status(400).send("Public key not found");
   } else {
     if (!verifySignature({ message: body, signature }, publicKey)) {
-      console.error("Invalid signature. Message not authenticated.");
+      console.error(
+        Date.now(),
+        "Invalid signature. Message not authenticated."
+      );
       return res.status(400).send("Invalid signature");
     } else {
       // console.log("Tried public key for node:", body.sent_by, "and verified");
@@ -790,6 +829,7 @@ app.post("/message", async (req, res) => {
         .digest("hex");
       if (computedHash !== body.hash) {
         console.error(
+          Date.now(),
           `Hash mismatch. Expected ${body.hash}, but got ${computedHash}`
         );
       } else {
@@ -799,8 +839,11 @@ app.post("/message", async (req, res) => {
             fs.readFileSync(clientPublicKeyPath, "utf8")
           )
         ) {
-          console.error("Invalid signature. Message not authenticated.");
-          console.log(clientSignedMessage);
+          console.error(
+            Date.now(),
+            "Invalid signature. Message not authenticated."
+          );
+          console.log(Date.now(), clientSignedMessage);
           // const errorMessage = {
           //   type: "error",
           //   message: "Invalid signature",
@@ -808,11 +851,12 @@ app.post("/message", async (req, res) => {
           // };
           // socket.write(JSON.stringify(errorMessage)); // socket variable undefined
         } else {
-          // TODO: Check if it is in view v
+          // Check if it is in view v
           const timeNow = Date.now();
           // Check if the sequence number is within the expected range
           if (body.seq < timeNow - 900000 || body.seq > timeNow + 900000) {
             console.error(
+              Date.now(),
               `Message seq ${body.seq} outside of expected range. Ignoring message.`
             );
             return res.status(400).send("Invalid sequence number");
@@ -833,6 +877,7 @@ app.post("/message", async (req, res) => {
               );
             } catch (error) {
               console.error(
+                Date.now(),
                 "Error inserting into consensus table:",
                 error.message
               );
@@ -898,7 +943,10 @@ const tcpServer = net.createServer((socket) => {
           fs.readFileSync(clientPublicKeyPath, "utf8")
         )
       ) {
-        console.error("Invalid signature. Message not authenticated.");
+        console.error(
+          Date.now(),
+          "Invalid signature. Message not authenticated."
+        );
         const errorMessage = {
           body: {
             type: "error",
@@ -918,25 +966,25 @@ const tcpServer = net.createServer((socket) => {
         }
       }
     } catch (err) {
-      console.error("Error processing TCP message:", err);
+      console.error(Date.now(), "Error processing TCP message:", err);
     }
   });
 
   socket.on("error", (err) => {
-    console.error("TCP connection error:", err);
+    console.error(Date.now(), "TCP connection error:", err);
   });
 
   socket.on("close", () => {
-    console.log("TCP connection closed");
+    console.log(Date.now(), "TCP connection closed");
   });
 });
 
 tcpServer.listen(4000, () => {
-  console.log("TCP server listening on port 4000");
+  console.log(Date.now(), "TCP server listening on port 4000");
 });
 
 const port = 3000;
 app.listen(port, () => {
-  console.log(`PBFT node running on ${process.env.HOSTNAME}:3000`);
-  console.log(`Initial view: ${primary}`);
+  console.log(Date.now(), `PBFT node running on ${process.env.HOSTNAME}:3000`);
+  console.log(Date.now(), `Initial view: ${primary}`);
 });
