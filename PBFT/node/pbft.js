@@ -132,7 +132,6 @@ function verifySignature(data, publicKey) {
 }
 
 function broadcast(message) {
-  console.log(Date.now(), `Broadcasting message: ${JSON.stringify(message)}`);
   nodes.forEach((node) => {
     if (
       // Considering broadcast also to self
@@ -140,6 +139,7 @@ function broadcast(message) {
       !crashedNodes.has(node)
     ) {
       axios.post(`http://${node}:3000/message`, message).catch(console.error);
+      console.log(Date.now(), `Broadcasting ${JSON.stringify(message.body.type)} to ${node}`);
     }
   });
 }
